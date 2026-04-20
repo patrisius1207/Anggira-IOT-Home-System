@@ -1,0 +1,48 @@
+# ===== PYTHON =====
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+env/
+.env
+
+# ===== SECRETS (JANGAN PERNAH COMMIT INI!) =====
+google_token.json
+*.token.json
+.env
+.env.local
+.bashrc_local
+secrets.py
+config_local.py
+
+# ===== LOGS =====
+*.log
+logs/
+
+# ===== ARDUINO / PLATFORMIO =====
+.pio/
+.pioenvs/
+.piolibdeps/
+*.bin
+*.elf
+*.map
+build/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== EDITOR =====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
