@@ -46,8 +46,8 @@ float getCpuLoad() {
 }
 
 // ================= WIFI =================
-const char *ssid = "PET HOUSE-2.4G";
-const char *password = "mahbang13";
+const char *ssid     = "YOUR_SSID";
+const char *password = "YOUR_PASSWORD";
 
 AsyncWebServer server(80);
 
