@@ -38,12 +38,37 @@ public:
         say_callback_ = cb;
     }
 
-    // Dipanggil dari application.cc ketika Xiaozhi selesai bicara (tts sentence_start)
-    void SetLastResponse(const std::string& text) {
+    // Dipanggil dari application.cc saat /say diterima (sebelum AI memproses)
+    void SetResponsePending() {
         std::lock_guard<std::mutex> lock(response_mutex_);
-        last_response_ = text;
-        response_consumed_ = false;
-        ESP_LOGI(WAKE_SERVER_TAG, "AI response stored: %s", text.c_str());
+        response_pending_ = true;
+        response_consumed_ = true;  // reset consumed agar response lama tidak terbaca
+        last_response_ = "";
+        response_buffer_ = "";
+        ESP_LOGI(WAKE_SERVER_TAG, "Response pending — waiting for AI...");
+    }
+
+    // Dipanggil dari application.cc per kalimat (tts sentence_start)
+    // Akumulasi kalimat sampai FinalizeResponse dipanggil
+    void AppendResponse(const std::string& text) {
+        std::lock_guard<std::mutex> lock(response_mutex_);
+        if (!response_buffer_.empty()) {
+            response_buffer_ += " ";
+        }
+        response_buffer_ += text;
+        response_pending_ = false;
+        ESP_LOGI(WAKE_SERVER_TAG, "AI sentence appended: %s", text.c_str());
+    }
+
+    // Dipanggil dari application.cc saat tts stop — finalisasi semua kalimat
+    void FinalizeResponse() {
+        std::lock_guard<std::mutex> lock(response_mutex_);
+        if (!response_buffer_.empty()) {
+            last_response_ = response_buffer_;
+            response_buffer_ = "";
+            response_consumed_ = false;
+            ESP_LOGI(WAKE_SERVER_TAG, "AI response finalized: %s", last_response_.c_str());
+        }
     }
 
     // Dipanggil dari application.cc ketika STT selesai (ucapan user)
@@ -148,9 +173,11 @@ private:
     std::function<void(const std::string&)> say_callback_;
 
     std::mutex  response_mutex_;
-    std::string last_response_;     // teks respons Xiaozhi terakhir
+    std::string last_response_;     // teks respons Xiaozhi final (setelah tts stop)
+    std::string response_buffer_;   // akumulasi kalimat yang masuk (tts sentence_start)
     std::string last_stt_;          // teks ucapan user terakhir
     bool        response_consumed_ = true;  // sudah dibaca bot atau belum
+    bool        response_pending_  = false; // AI sedang memproses, belum ada respons
 
     static esp_err_t SendJson(httpd_req_t *req, const char* json) {
         httpd_resp_set_type(req, "application/json");
@@ -214,6 +241,7 @@ private:
         }
 
         ESP_LOGI(WAKE_SERVER_TAG, "POST /say — text: %s", text.c_str());
+        self->SetResponsePending();  // tandai AI sedang memproses
         if (self->say_callback_) self->say_callback_(text);
         return SendJson(req, "{\"status\":\"ok\",\"action\":\"say\"}");
     }
@@ -231,7 +259,12 @@ private:
         std::lock_guard<std::mutex> lock(self->response_mutex_);
 
         auto* root = cJSON_CreateObject();
-        if (!self->last_response_.empty() && !self->response_consumed_) {
+        if (self->response_pending_) {
+            // AI masih memproses, belum ada respons
+            cJSON_AddStringToObject(root, "status", "pending");
+            cJSON_AddStringToObject(root, "text", "");
+            cJSON_AddFalseToObject(root, "new");
+        } else if (!self->last_response_.empty() && !self->response_consumed_) {
             cJSON_AddStringToObject(root, "status", "ok");
             cJSON_AddStringToObject(root, "text", self->last_response_.c_str());
             cJSON_AddTrueToObject(root, "new");
