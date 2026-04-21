@@ -1,3 +1,4 @@
+import asyncio
 """
 Xiaozhi Wake Bot — Telegram Bot untuk STB Android (Termux)
 ===========================================================
@@ -37,7 +38,9 @@ ESP32_PORT = int(os.environ.get('ESP32_PORT', '80'))
 
 WAKE_URL   = f"http://{ESP32_IP}:{ESP32_PORT}/wake"
 STATUS_URL = f"http://{ESP32_IP}:{ESP32_PORT}/status"
-SAY_URL    = f"http://{ESP32_IP}:{ESP32_PORT}/say"
+SAY_URL      = f"http://{ESP32_IP}:{ESP32_PORT}/say"
+RESPONSE_URL = f"http://{ESP32_IP}:{ESP32_PORT}/response"
+STT_URL      = f"http://{ESP32_IP}:{ESP32_PORT}/stt"
 WAKE_WORD  = os.environ.get('WAKE_WORD', 'Hi ESP')
 
 # Whitelist dari env — format: "123456789,987654321"
@@ -99,6 +102,23 @@ def send_say_http(text: str) -> bool:
         logger.error("Error kirim say: %s", e)
         return False
 
+
+
+
+def poll_response(timeout: int = 8, interval: float = 0.5) -> str:
+    """Poll /response ESP32 sampai ada respons baru atau timeout."""
+    import time
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(RESPONSE_URL, timeout=3) as r:
+                data = json.loads(r.read().decode())
+                if data.get("new") and data.get("text"):
+                    return data["text"]
+        except Exception as e:
+            logger.warning("poll_response error: %s", e)
+        time.sleep(interval)
+    return ""
 
 def check_esp32_status() -> str:
     """Cek status ESP32."""
@@ -194,14 +214,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown"
             )
     else:
-        await update.message.reply_text(f"⏳ Mengirim perintah: _{text}_...", parse_mode="Markdown")
+        await update.message.reply_text(f"⏳ Mengirim ke Xiaozhi: _{text}_...", parse_mode="Markdown")
         success = send_say_http(text)
         if success:
-            await update.message.reply_text(
-                f"✅ Perintah terkirim ke Xiaozhi!\n"
-                f"💬 `{text}`",
-                parse_mode="Markdown"
-            )
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, poll_response, 10)
+            if response:
+                await update.message.reply_text(
+                    f"🤖 *Xiaozhi:*\n{response}",
+                    parse_mode="Markdown"
+                )
+            else:
+                await update.message.reply_text(
+                    f"✅ Perintah terkirim!\n💬 `{text}`\n_(tidak ada respons teks)_",
+                    parse_mode="Markdown"
+                )
         else:
             await update.message.reply_text(
                 "❌ Gagal mengirim perintah.\n"
