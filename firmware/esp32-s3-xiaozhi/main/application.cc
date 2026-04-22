@@ -997,16 +997,29 @@ void Application::SendTextToAI(const std::string& text)
 {
     ESP_LOGI(TAG, "SendTextToAI: %s", text.c_str());
 
+    if (device_state_ != kDeviceStateIdle) {
+        ESP_LOGW(TAG, "SendTextToAI: device not idle (state=%d), skipping", device_state_);
+        return;
+    }
+
     // Buka audio channel jika belum terbuka
     if (!protocol_->IsAudioChannelOpened()) {
+        SetDeviceState(kDeviceStateConnecting);
         if (!protocol_->OpenAudioChannel()) {
             ESP_LOGE(TAG, "SendTextToAI: Failed to open audio channel");
+            SetDeviceState(kDeviceStateIdle);
             return;
         }
     }
 
-    // Kirim teks langsung sebagai STT result tanpa mengubah state
-    // Format sama dengan SendWakeWordDetected:
-    // {"session_id":"...","type":"listen","state":"detect","text":"..."}
+    // Bunyi popup seperti wake word fisik agar codec audio aktif
+    audio_service_.PlaySound(Lang::Sounds::P3_POPUP);
+
+    // Set state listening agar TTS response bisa diputar
+    SetListeningMode(aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime);
+
+    // Kirim teks sebagai STT result — server AI akan langsung proses tanpa tunggu audio
     protocol_->SendWakeWordDetected(text);
+
+    ESP_LOGI(TAG, "SendTextToAI: sent, state=listening, waiting for TTS response");
 }
