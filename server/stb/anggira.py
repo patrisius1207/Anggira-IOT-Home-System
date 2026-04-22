@@ -14,9 +14,13 @@ from services import (
     play_radio, play_radio_stb, stop_radio, stop_radio_stb,
     play_radio_stb_http, stop_radio_stb_http, list_radio_stations,
     lamp_on, lamp_off, get_sensor_rumah, get_schedule, set_schedule,
-    get_weather, get_news, get_time,
+    get_weather, get_weather_detail, get_news, get_time,
     get_calendar, add_calendar_event,
-    tts_stb, TELEGRAM_STB_TOKEN, DEFAULT_CITY, MCP_ENDPOINT
+    wikipedia, kurs, saham, indeks_saham, kalkulator,
+    web_search, world_time, crypto, set_reminder,
+    tts_stb, TELEGRAM_STB_TOKEN, DEFAULT_CITY, MCP_ENDPOINT,
+    get_vatican_news,
+    get_news_topik
 )
 
 # ================= TELEGRAM BOT =================
@@ -193,7 +197,19 @@ async def handle_mcp():
                             {"name": "stop_radio_stb", "description": "Hentikan radio STB", "inputSchema": {"type": "object", "properties": {}}},
                             {"name": "list_radio", "description": "Daftar radio", "inputSchema": {"type": "object", "properties": {}}},
                             {"name": "get_calendar", "description": "Lihat jadwal", "inputSchema": {"type": "object", "properties": {"days_ahead": {"type": "integer"}}}},
-                            {"name": "add_calendar_event", "description": "Tambah event", "inputSchema": {"type": "object", "properties": {"summary": {"type": "string"}, "start_datetime": {"type": "string"}, "end_datetime": {"type": "string"}, "description": {"type": "string"}, "location": {"type": "string"}}, "required": ["summary", "start_datetime"]}}
+                            {"name": "wikipedia", "description": "Cari informasi dari Wikipedia. Gunakan untuk pertanyaan faktual, sejarah, tokoh, sains, geografi, dll.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "Topik yang dicari"}, "lang": {"type": "string", "description": "Bahasa: id atau en (default: id)"}}, "required": ["query"]}},
+                            {"name": "web_search", "description": "Cari informasi terkini di internet. Gunakan untuk berita terbaru atau info yang tidak ada di Wikipedia.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+                            {"name": "kurs", "description": "Cek kurs/nilai tukar mata uang realtime. Contoh: USD ke IDR, EUR ke IDR.", "inputSchema": {"type": "object", "properties": {"from_currency": {"type": "string", "description": "Mata uang asal (USD, EUR, SGD, JPY, dll)"}, "to_currency": {"type": "string", "description": "Mata uang tujuan (IDR, USD, dll)"}, "amount": {"type": "string", "description": "Jumlah (default: 1)"}}, "required": ["from_currency", "to_currency"]}},
+                            {"name": "saham", "description": "Cek harga saham atau indeks pasar. Gunakan simbol: ^JKSE (IHSG), ^GSPC (S&P500), ^IXIC (Nasdaq), BBCA.JK, TLKM.JK, AAPL, GOOGL, dll.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string", "description": "Simbol saham atau indeks"}}, "required": ["symbol"]}},
+                            {"name": "indeks_saham", "description": "Cek indeks pasar saham dengan nama populer: IHSG, S&P500, Nasdaq, Dow, Nikkei, HangSeng, dll.", "inputSchema": {"type": "object", "properties": {"nama": {"type": "string", "description": "Nama indeks: IHSG, S&P500, Nasdaq, Dow, Nikkei, HangSeng, FTSE, DAX, dll."}}, "required": ["nama"]}},
+                            {"name": "crypto", "description": "Cek harga mata uang kripto dalam USD dan IDR. Contoh: BTC, ETH, BNB, SOL, XRP, DOGE.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string", "description": "Simbol kripto: BTC, ETH, BNB, SOL, XRP, DOGE, ADA, dll."}}, "required": ["symbol"]}},
+                            {"name": "kalkulator", "description": "Hitung ekspresi matematika. Mendukung +, -, *, /, ^, sin, cos, tan, sqrt, log, log10, exp, factorial, pi, e.", "inputSchema": {"type": "object", "properties": {"expression": {"type": "string", "description": "Ekspresi: 2^10, sqrt(144), sin(pi/2), log(100), 5!"}}, "required": ["expression"]}},
+                            {"name": "world_time", "description": "Cek waktu saat ini di kota atau negara lain.", "inputSchema": {"type": "object", "properties": {"timezone": {"type": "string", "description": "Nama kota (Tokyo, London, New York, Dubai, Singapore, Mekah) atau timezone IANA (Asia/Tokyo, Europe/London)"}}, "required": ["timezone"]}},
+                            {"name": "cuaca_detail", "description": "Cuaca lengkap suatu kota: suhu, kelembaban, angin, tekanan, waktu matahari terbit/terbenam.", "inputSchema": {"type": "object", "properties": {"city": {"type": "string", "description": "Nama kota"}}, "required": ["city"]}},
+                            {"name": "pengingat", "description": "Setel pengingat/timer dalam menit.", "inputSchema": {"type": "object", "properties": {"menit": {"type": "string", "description": "Jumlah menit (1-480)"}, "pesan": {"type": "string", "description": "Pesan pengingat"}}, "required": ["menit", "pesan"]}},
+                            {"name": "add_calendar_event", "description": "Tambah event", "inputSchema": {"type": "object", "properties": {"summary": {"type": "string"}, "start_datetime": {"type": "string"}, "end_datetime": {"type": "string"}, "description": {"type": "string"}, "location": {"type": "string"}}, "required": ["summary", "start_datetime"]}},
+                            {"name": "vatican_news", "description": "Berita terbaru dari Vatican News. Gunakan untuk berita Paus, Gereja Katolik, dan Vatikan. Parameter lang: id (Indonesia, default) atau en (Inggris). Parameter translate: true untuk terjemahkan berita Inggris ke Indonesia. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"lang": {"type": "string", "description": "Bahasa feed: id atau en (default: id)"}, "translate": {"type": "boolean", "description": "Terjemahkan ke Indonesia (hanya berlaku jika lang=en)"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10, default 5)"}}, "required": []}},
+                            {"name": "berita_topik", "description": "Cari berita terbaru berdasarkan topik bebas via Google News. Gunakan untuk: berita ekonomi, harga minyak, teknologi, olahraga, politik, hiburan, atau topik apapun yang diminta user. Parameter topik: kata kunci berita (contoh: harga minyak dunia, AI teknologi, ekonomi Indonesia). Parameter lang: id (default) atau en. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"topik": {"type": "string", "description": "Topik atau kata kunci berita"}, "lang": {"type": "string", "description": "Bahasa: id atau en"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10)"}}, "required": ["topik"]}}
                         ]
                     }
                 }))
@@ -220,6 +236,18 @@ async def handle_mcp():
                 elif tool == "list_radio": result = await get_radio_list()
                 elif tool == "get_calendar": result = await get_calendar(int(args.get("days_ahead", 7)))
                 elif tool == "add_calendar_event": result = await add_calendar_event(args.get("summary", ""), args.get("start_datetime", ""), args.get("end_datetime"), args.get("description", ""), args.get("location", ""))
+                elif tool == "wikipedia": result = await wikipedia(args.get("query", ""), args.get("lang", "id"))
+                elif tool == "web_search": result = await web_search(args.get("query", ""))
+                elif tool == "kurs": result = await kurs(args.get("from_currency", "USD"), args.get("to_currency", "IDR"), float(args.get("amount", 1)))
+                elif tool == "saham": result = await saham(args.get("symbol", ""))
+                elif tool == "indeks_saham": result = await indeks_saham(args.get("nama", ""))
+                elif tool == "crypto": result = await crypto(args.get("symbol", "BTC"))
+                elif tool == "kalkulator": result = await kalkulator(args.get("expression", ""))
+                elif tool == "world_time": result = await world_time(args.get("timezone", "Asia/Jakarta"))
+                elif tool == "cuaca_detail": result = await get_weather_detail(args.get("city", DEFAULT_CITY))
+                elif tool == "pengingat": result = await set_reminder(args.get("menit", 5), args.get("pesan", "Pengingat"))
+                elif tool == "vatican_news": result = await get_vatican_news(args.get("lang", "id"), args.get("translate", False), int(args.get("limit", 5)))
+                elif tool == "berita_topik": result = await get_news_topik(args.get("topik", ""), args.get("lang", "id"), int(args.get("limit", 5)))
                 else: result = "Tool tidak dikenal"
 
                 await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": str(result)}]}}))

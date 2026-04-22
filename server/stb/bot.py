@@ -1,3 +1,4 @@
+import asyncio
 """
 Xiaozhi Wake Bot — Telegram Bot untuk STB Android (Termux)
 ===========================================================
@@ -13,15 +14,13 @@ Dependensi:
 Env variables (.bashrc):
     export TELEGRAM_BOT_TOKEN="token_xiaozhi_bot"
     export ESP32_IP="192.168.1.222"
-    export ESP32_PORT="8080"           ← pakai 8080 sesuai wake_server.h
+    export ESP32_PORT="80"
     export TELEGRAM_ALLOWED_USER_ID="8407417185"
 """
 
-import asyncio
 import json
 import logging
 import os
-import time
 import urllib.request
 import urllib.error
 
@@ -33,14 +32,16 @@ from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, Comma
 # ─────────────────────────────────────────────────────────────
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 
+# IP & Port ESP32 dari env, fallback ke default
 ESP32_IP   = os.environ.get('ESP32_IP', '192.168.1.222')
-ESP32_PORT = int(os.environ.get('ESP32_PORT', '8080'))   # wake_server.h pakai 8080
+ESP32_PORT = int(os.environ.get('ESP32_PORT', '80'))
 
-WAKE_URL     = f"http://{ESP32_IP}:{ESP32_PORT}/wake"
-STATUS_URL   = f"http://{ESP32_IP}:{ESP32_PORT}/status"
+WAKE_URL   = f"http://{ESP32_IP}:{ESP32_PORT}/wake"
+STATUS_URL = f"http://{ESP32_IP}:{ESP32_PORT}/status"
 SAY_URL      = f"http://{ESP32_IP}:{ESP32_PORT}/say"
 RESPONSE_URL = f"http://{ESP32_IP}:{ESP32_PORT}/response"
-WAKE_WORD    = os.environ.get('WAKE_WORD', 'Hi ESP')
+STT_URL      = f"http://{ESP32_IP}:{ESP32_PORT}/stt"
+WAKE_WORD  = os.environ.get('WAKE_WORD', 'Hi ESP')
 
 # Whitelist dari env — format: "123456789,987654321"
 _allowed_str = os.environ.get('TELEGRAM_ALLOWED_USER_ID', '')
@@ -80,7 +81,6 @@ def send_wake_http() -> bool:
         logger.error("Error kirim wake: %s", e)
         return False
 
-
 def send_say_http(text: str) -> bool:
     """Kirim teks perintah ke Xiaozhi AI via /say endpoint."""
     try:
@@ -103,41 +103,48 @@ def send_say_http(text: str) -> bool:
         return False
 
 
-def poll_response(timeout: int = 25, interval: float = 1.0) -> str:
-    """
-    Poll /response ESP32 sampai ada respons baru atau timeout.
 
-    Status yang dikembalikan ESP32:
-      pending  — AI masih memproses, lanjut poll
-      ok+new   — respons baru tersedia, ambil dan return
-      ok       — respons lama (sudah dibaca), lanjut poll
-      empty    — belum ada sama sekali, lanjut poll
+
+def poll_response(timeout: int = 30, interval: float = 0.8) -> str:
     """
-    deadline = time.time() + timeout
-    waited = 0
+    Poll /response ESP32 dan kumpulkan SEMUA kalimat respons.
+
+    ESP32 menyimpan satu kalimat per TTS sentence_start. Fungsi ini
+    mengumpulkan semua kalimat selama masih ada new=true, baru return
+    setelah idle IDLE_AFTER detik tanpa kalimat baru.
+    """
+    import time
+    IDLE_AFTER = 3.0   # detik tanpa respons baru → anggap selesai
+    collected  = []
+    last_new   = None  # waktu terakhir dapat kalimat baru
+    deadline   = time.time() + timeout
+
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(RESPONSE_URL, timeout=5) as r:
+            with urllib.request.urlopen(RESPONSE_URL, timeout=4) as r:
                 data = json.loads(r.read().decode())
-                status = data.get("status", "")
-                is_new = data.get("new", False)
-                text   = data.get("text", "")
 
-                logger.info("poll[%ds] status=%s new=%s text=%s", waited, status, is_new, text[:40] if text else "")
+            if data.get("new") and data.get("text"):
+                text = data["text"].strip()
+                if text and text not in collected:
+                    collected.append(text)
+                    last_new = time.time()
+                    logger.info("poll_response: dapat kalimat [%d]: %s", len(collected), text[:60])
+                # Terus poll — mungkin ada kalimat berikutnya
+            else:
+                # Tidak ada kalimat baru
+                if collected and last_new and (time.time() - last_new) >= IDLE_AFTER:
+                    # Sudah idle cukup lama, semua kalimat sudah terkumpul
+                    break
 
-                if is_new and text:
-                    return text   # ✅ Dapat respons baru
-
-                # Masih pending atau belum ada — tunggu lagi
         except Exception as e:
             logger.warning("poll_response error: %s", e)
 
         time.sleep(interval)
-        waited += int(interval)
 
-    logger.warning("poll_response timeout setelah %ds", timeout)
+    if collected:
+        return " ".join(collected)
     return ""
-
 
 def check_esp32_status() -> str:
     """Cek status ESP32."""
@@ -167,16 +174,55 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat_id
     logger.info("/start dari chat_id=%d", chat_id)
     await update.message.reply_text(
-        "🤖 *Xiaozhi Wake Bot*\n\n"
+        "🤖 *Xiaozhi Wake Bot*\n"
         f"ESP32: `{ESP32_IP}:{ESP32_PORT}`\n\n"
-        "Kirim salah satu pesan berikut untuk membangunkan ESP32:\n"
-        "• `Hi, ESP`\n"
-        "• `Hi ESP`\n"
-        "• `wake esp`\n"
-        "• `bangunkan esp`\n\n"
-        "Perintah:\n"
-        "/status — cek status ESP32\n"
-        "/help   — bantuan ini",
+        "━━━━━━━━━━━━━━━━━━\n"
+        "⚡ *WAKE WORD*\n"
+        "`Hi ESP` · `Hi, ESP` · `hiesp`\n"
+        "`wake` · `bangun` · `wake esp` · `bangunkan esp`\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "💬 *BICARA KE XIAOZHI*\n"
+        "Setelah Xiaozhi bangun, kirim pesan apapun\n"
+        "Contoh: `nyalakan lampu`, `cuaca hari ini`\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🏠 *RUMAH PINTAR*\n"
+        "`nyalakan lampu` · `matikan lampu`\n"
+        "`suhu rumah` — cek suhu & kelembaban\n"
+        "`jadwal lampu` — lihat jadwal otomatis\n"
+        "`atur jadwal nyala jam 18 mati jam 6`\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🎵 *MUSIK*\n"
+        "`putar [lagu] [artis]` — speaker ESP32\n"
+        "`putar [lagu] di TV` — speaker STB/TV\n"
+        "`stop musik` — hentikan musik\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📻 *RADIO*\n"
+        "`putar radio [stasiun]` — speaker ESP32\n"
+        "`putar radio [stasiun] di TV` — speaker STB\n"
+        "`stop radio` · `daftar radio`\n"
+        "Stasiun: prambors, hardrock, delta, traxfm,\n"
+        "female, idolafm, salatiga, bbc, jazz24, dll\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "📅 *KALENDER*\n"
+        "`jadwal minggu ini` — lihat Google Calendar\n"
+        "`tambah jadwal [event] [tanggal] [jam]`\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🌐 *INFO & DATA*\n"
+        "`cuaca` / `cuaca [kota]`\n"
+        "`berita` — 5 berita terkini Indonesia\n"
+        "`berita vatikan` — Vatican News (bahasa Indonesia)\n"
+        "`berita vatikan inggris` — Vatican News (Inggris)\n"
+        "`berita vatikan terjemahan` — Vatican News diterjemahkan\n"
+        "`jam sekarang` / `jam di Tokyo`\n"
+        "`cari [topik]` — Wikipedia / web search\n"
+        "`kurs USD ke IDR` — nilai tukar\n"
+        "`harga BTC` / `saham BBCA` / `IHSG`\n"
+        "`hitung [ekspresi]` — kalkulator\n"
+        "`ingatkan [N] menit [pesan]` — timer\n\n"
+        "━━━━━━━━━━━━━━━━━━\n"
+        "🔧 *PERINTAH BOT*\n"
+        "/status — cek koneksi ESP32\n"
+        "/help — tampilkan bantuan ini",
         parse_mode="Markdown"
     )
 
@@ -229,37 +275,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"ESP32 tidak merespons di `{WAKE_URL}`\n\n"
                 "Pastikan:\n"
                 "• ESP32 menyala dan terhubung WiFi\n"
-                "• Firmware sudah include `wake_server.h`\n"
-                f"• Port ESP32 di env sudah `{ESP32_PORT}`",
+                "• Firmware sudah include `wake_server.h`",
                 parse_mode="Markdown"
             )
     else:
-        # Kirim perintah ke Xiaozhi dan tunggu responnya
-        thinking_msg = await update.message.reply_text(
-            f"⏳ Mengirim ke Xiaozhi: _{text}_...", parse_mode="Markdown"
-        )
+        await update.message.reply_text(f"⏳ Mengirim ke Xiaozhi: _{text}_...", parse_mode="Markdown")
         success = send_say_http(text)
-        if not success:
-            await thinking_msg.edit_text(
+        if success:
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, poll_response)
+            if response:
+                await update.message.reply_text(
+                    f"🤖 *Xiaozhi:*\n{response}",
+                    parse_mode="Markdown"
+                )
+            else:
+                await update.message.reply_text(
+                    f"✅ Perintah terkirim!\n💬 `{text}`\n_(tidak ada respons teks)_",
+                    parse_mode="Markdown"
+                )
+        else:
+            await update.message.reply_text(
                 "❌ Gagal mengirim perintah.\n"
                 "Coba ketik `Hi ESP` dulu untuk membangunkan Xiaozhi.",
-                parse_mode="Markdown"
-            )
-            return
-
-        # Tunggu jawaban Xiaozhi via polling /response
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, poll_response)
-
-        if response:
-            await thinking_msg.edit_text(
-                f"🤖 *Xiaozhi:*\n{response}",
-                parse_mode="Markdown"
-            )
-        else:
-            await thinking_msg.edit_text(
-                f"✅ Perintah terkirim: `{text}`\n"
-                "_(Xiaozhi tidak mengirim respons teks — mungkin sedang berbicara)_",
                 parse_mode="Markdown"
             )
 
@@ -277,7 +315,6 @@ def main():
     logger.info("  ESP32 : http://%s:%d", ESP32_IP, ESP32_PORT)
     logger.info("  Wake  : %s", WAKE_URL)
     logger.info("  Say   : %s", SAY_URL)
-    logger.info("  Response: %s", RESPONSE_URL)
     logger.info("  Allowed IDs: %s", ALLOWED_CHAT_IDS if ALLOWED_CHAT_IDS else "semua")
     logger.info("=" * 50)
 

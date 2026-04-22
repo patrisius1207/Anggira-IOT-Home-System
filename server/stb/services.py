@@ -397,3 +397,530 @@ def tts_stb(text):
 # ================= WAKTU =================
 async def get_time():
     return datetime.now().strftime("%H:%M")
+
+# ================= WIKIPEDIA =================
+def _wikipedia(query, lang="id"):
+    """Cari ringkasan artikel Wikipedia. Coba bahasa Indonesia dulu, fallback Inggris."""
+    try:
+        for lng in ([lang] if lang == "en" else [lang, "en"]):
+            # Cari judul
+            search_url = (
+                f"https://{lng}.wikipedia.org/w/api.php"
+                f"?action=query&list=search&srsearch={urllib.parse.quote(query)}"
+                f"&format=json&srlimit=1&utf8=1"
+            )
+            req = urllib.request.Request(search_url, headers={"User-Agent": "AnggiraBot/1.0"})
+            with urllib.request.urlopen(req, timeout=8) as r:
+                data = json.loads(r.read().decode())
+            hits = data.get("query", {}).get("search", [])
+            if not hits:
+                continue
+            title = hits[0]["title"]
+            # Ambil ringkasan
+            extract_url = (
+                f"https://{lng}.wikipedia.org/w/api.php"
+                f"?action=query&prop=extracts&exintro&explaintext&exsectionformat=plain"
+                f"&titles={urllib.parse.quote(title)}&format=json&utf8=1"
+            )
+            req2 = urllib.request.Request(extract_url, headers={"User-Agent": "AnggiraBot/1.0"})
+            with urllib.request.urlopen(req2, timeout=8) as r:
+                sdata = json.loads(r.read().decode())
+            pages = sdata.get("query", {}).get("pages", {})
+            extract = next(iter(pages.values())).get("extract", "").strip()
+            extract = re.sub(r'\n+', ' ', extract)
+            if len(extract) > 600:
+                extract = extract[:600].rsplit(' ', 1)[0] + "..."
+            if extract:
+                return f"📖 {title}:\n{extract}"
+        return f"Tidak ditemukan info tentang '{query}' di Wikipedia."
+    except Exception as e:
+        return f"Wikipedia error: {e}"
+
+async def wikipedia(query, lang="id"):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _wikipedia, query, lang)
+
+# ================= KURS MATA UANG =================
+def _kurs(from_cur, to_cur, amount=1.0):
+    """Kurs mata uang realtime via open.er-api.com (gratis, tanpa key)."""
+    try:
+        from_c = from_cur.upper().strip()
+        to_c   = to_cur.upper().strip()
+        url = f"https://open.er-api.com/v6/latest/{from_c}"
+        req = urllib.request.Request(url, headers={"User-Agent": "AnggiraBot/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode())
+        if data.get("result") != "success":
+            return f"Gagal ambil kurs {from_c}: {data.get('error-type','unknown')}"
+        rates  = data.get("rates", {})
+        update = data.get("time_last_update_utc", "")
+        if to_c not in rates:
+            # Tampilkan beberapa kurs populer jika to_c tidak dikenali
+            popular = ["USD","EUR","SGD","MYR","JPY","GBP","AUD","IDR"]
+            lines = [f"Kurs {from_c} (update: {update[:16]})"]
+            for c in popular:
+                if c in rates and c != from_c:
+                    lines.append(f"  {c}: {rates[c]:,.4f}")
+            return "\n".join(lines)
+        rate  = rates[to_c]
+        total = rate * float(amount)
+        return (
+            f"💱 Kurs {from_c} → {to_c}\n"
+            f"1 {from_c} = {rate:,.4f} {to_c}\n"
+            f"{amount:g} {from_c} = {total:,.2f} {to_c}\n"
+            f"Update: {update[:16]}"
+        )
+    except Exception as e:
+        return f"Kurs error: {e}"
+
+async def kurs(from_cur, to_cur, amount=1.0):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _kurs, from_cur, to_cur, amount)
+
+# ================= INDEKS SAHAM =================
+def _stock(symbol):
+    """
+    Ambil harga saham/indeks via Yahoo Finance (tanpa API key).
+    Symbol: IHSG=^JKSE, S&P500=^GSPC, NASDAQ=^IXIC, Dow=^DJI, Nikkei=^N225
+    Saham: BBCA.JK, TLKM.JK, AAPL, GOOGL, dst
+    """
+    try:
+        sym = symbol.upper().strip()
+        # Yahoo Finance v8 JSON endpoint
+        url = (
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{urllib.parse.quote(sym)}"
+            f"?interval=1d&range=1d"
+        )
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json"
+        })
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode())
+
+        meta = data["chart"]["result"][0]["meta"]
+        name      = meta.get("longName") or meta.get("shortName") or sym
+        price     = meta.get("regularMarketPrice", 0)
+        prev      = meta.get("chartPreviousClose") or meta.get("previousClose") or price
+        currency  = meta.get("currency", "")
+        exchange  = meta.get("exchangeName", "")
+        change    = price - prev
+        pct       = (change / prev * 100) if prev else 0
+        arrow     = "▲" if change >= 0 else "▼"
+        sign      = "+" if change >= 0 else ""
+
+        return (
+            f"📈 {name} ({sym})\n"
+            f"Harga: {price:,.2f} {currency}\n"
+            f"{arrow} {sign}{change:,.2f} ({sign}{pct:.2f}%)\n"
+            f"Bursa: {exchange}"
+        )
+    except Exception as e:
+        return f"Saham error ({symbol}): {e}"
+
+# Alias untuk indeks populer
+def _indeks_saham(nama):
+    """Ambil indeks saham berdasarkan nama populer (IHSG, S&P500, Nasdaq, dll)."""
+    mapping = {
+        "ihsg":    "^JKSE",
+        "jkse":    "^JKSE",
+        "sp500":   "^GSPC",
+        "s&p500":  "^GSPC",
+        "s&p":     "^GSPC",
+        "nasdaq":  "^IXIC",
+        "dow":     "^DJI",
+        "djia":    "^DJI",
+        "nikkei":  "^N225",
+        "hangseng":"^HSI",
+        "hsi":     "^HSI",
+        "sti":     "^STI",
+        "asx":     "^AXJO",
+        "ftse":    "^FTSE",
+        "dax":     "^GDAXI",
+        "cac":     "^FCHI",
+    }
+    key = nama.lower().strip().replace(" ", "")
+    sym = mapping.get(key, nama)  # fallback: pakai nama apa adanya sebagai symbol
+    return _stock(sym)
+
+async def saham(symbol):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _stock, symbol)
+
+async def indeks_saham(nama):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _indeks_saham, nama)
+
+# ================= KALKULATOR =================
+def _kalkulator(expr):
+    """Evaluasi ekspresi matematika dengan aman (sin, cos, sqrt, log, pow, dll)."""
+    import math
+    try:
+        # Normalisasi
+        expr = expr.replace("^", "**").replace(",", ".").replace("×", "*").replace("÷", "/")
+        # Whitelist karakter
+        allowed = set("0123456789+-*/().eE_ ")
+        math_funcs = {"sin","cos","tan","asin","acos","atan","sqrt","log","log10",
+                      "log2","exp","abs","ceil","floor","round","pi","e","inf","pow","factorial"}
+        # Cek apakah ada nama fungsi
+        cleaned = re.sub(r'[a-zA-Z_]+', '', expr)
+        if not all(c in allowed for c in cleaned):
+            return "Ekspresi tidak valid. Contoh: 2^10, sqrt(144), sin(pi/2), log(100)"
+        safe_globals = {"__builtins__": {}}
+        safe_locals  = {k: getattr(math, k) for k in dir(math) if k in math_funcs}
+        safe_locals["pi"]  = math.pi
+        safe_locals["e"]   = math.e
+        result = eval(expr, safe_globals, safe_locals)  # noqa: S307
+        if isinstance(result, float) and result == int(result):
+            return f"🧮 {expr} = {int(result)}"
+        return f"🧮 {expr} = {result:g}"
+    except ZeroDivisionError:
+        return "Error: pembagian dengan nol"
+    except Exception as e:
+        return f"Kalkulator error: {e}"
+
+async def kalkulator(expr):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _kalkulator, expr)
+
+# ================= WEB SEARCH =================
+def _web_search(query):
+    """Cari info via DuckDuckGo Instant Answer API (tanpa key)."""
+    try:
+        url = (
+            f"https://api.duckduckgo.com/"
+            f"?q={urllib.parse.quote(query)}&format=json&no_redirect=1&no_html=1&skip_disambig=1"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "AnggiraBot/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode())
+
+        abstract = data.get("AbstractText", "").strip()
+        if abstract:
+            source = data.get("AbstractSource", "")
+            url_link = data.get("AbstractURL", "")
+            result = abstract[:500]
+            if len(abstract) > 500:
+                result = abstract[:500].rsplit(' ', 1)[0] + "..."
+            footer = f"\n📎 {source}" if source else ""
+            return f"🔍 {result}{footer}"
+
+        # Fallback ke related topics
+        topics = data.get("RelatedTopics", [])
+        snippets = []
+        for t in topics[:4]:
+            if isinstance(t, dict) and t.get("Text"):
+                snippets.append(t["Text"][:150])
+        if snippets:
+            return "🔍 " + "\n\n".join(snippets)
+
+        # Fallback ke Answer
+        answer = data.get("Answer", "").strip()
+        if answer:
+            return f"🔍 {answer}"
+
+        return f"Tidak ditemukan hasil untuk: '{query}'. Coba kata kunci lain."
+    except Exception as e:
+        return f"Web search error: {e}"
+
+async def web_search(query):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _web_search, query)
+
+# ================= WAKTU DUNIA =================
+def _world_time(tz_name):
+    """Waktu saat ini di timezone tertentu via worldtimeapi.org."""
+    try:
+        # Alias nama kota populer → timezone IANA
+        alias = {
+            "jakarta":     "Asia/Jakarta",
+            "tokyo":       "Asia/Tokyo",
+            "london":      "Europe/London",
+            "new york":    "America/New_York",
+            "paris":       "Europe/Paris",
+            "sydney":      "Australia/Sydney",
+            "dubai":       "Asia/Dubai",
+            "singapore":   "Asia/Singapore",
+            "beijing":     "Asia/Shanghai",
+            "moscow":      "Europe/Moscow",
+            "los angeles": "America/Los_Angeles",
+            "la":          "America/Los_Angeles",
+            "mekah":       "Asia/Riyadh",
+            "mekkah":      "Asia/Riyadh",
+        }
+        tz = alias.get(tz_name.lower().strip(), tz_name)
+        url = f"https://worldtimeapi.org/api/timezone/{urllib.parse.quote(tz)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "AnggiraBot/1.0"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read().decode())
+        dt_str   = data.get("datetime", "")
+        timezone_name = data.get("timezone", tz)
+        dt       = datetime.fromisoformat(dt_str)
+        day_names = ["Senin","Selasa","Rabu","Kamis","Jumat","Sabtu","Minggu"]
+        day      = day_names[dt.weekday()]
+        return (
+            f"🕐 {timezone_name}\n"
+            f"{day}, {dt.strftime('%d %B %Y %H:%M:%S')}"
+        )
+    except Exception as e:
+        return f"World time error: {e}"
+
+async def world_time(tz_name):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _world_time, tz_name)
+
+# ================= CUACA DETAIL =================
+async def get_weather_detail(city):
+    """Cuaca lengkap: suhu, kelembaban, angin, tekanan."""
+    try:
+        url = (
+            f"https://api.openweathermap.org/data/2.5/weather"
+            f"?q={city},ID&appid={OPENWEATHER_API_KEY}&units=metric&lang=id"
+        )
+        with urllib.request.urlopen(url, timeout=8) as r:
+            d = json.loads(r.read().decode())
+        main = d["main"]
+        wind = d.get("wind", {})
+        desc = d["weather"][0]["description"].capitalize()
+        sunrise = datetime.fromtimestamp(d["sys"]["sunrise"], tz=timezone.utc).astimezone(timezone(timedelta(hours=7))).strftime("%H:%M")
+        sunset  = datetime.fromtimestamp(d["sys"]["sunset"],  tz=timezone.utc).astimezone(timezone(timedelta(hours=7))).strftime("%H:%M")
+        return (
+            f"🌤 Cuaca {city}\n"
+            f"{desc}\n"
+            f"🌡 Suhu: {main['temp']}°C (terasa {main['feels_like']}°C)\n"
+            f"💧 Kelembaban: {main['humidity']}%\n"
+            f"💨 Angin: {wind.get('speed',0)} m/s\n"
+            f"🔵 Tekanan: {main['pressure']} hPa\n"
+            f"🌅 Matahari terbit: {sunrise} | terbenam: {sunset} WIB"
+        )
+    except Exception as e:
+        return f"Cuaca detail error: {e}"
+
+# ================= HARGA CRYPTO =================
+def _crypto(symbol):
+    """Harga crypto via CoinGecko (gratis, tanpa key)."""
+    try:
+        # Map simbol populer → CoinGecko ID
+        mapping = {
+            "btc": "bitcoin", "bitcoin": "bitcoin",
+            "eth": "ethereum", "ethereum": "ethereum",
+            "bnb": "binancecoin",
+            "sol": "solana", "solana": "solana",
+            "xrp": "ripple", "ripple": "ripple",
+            "doge": "dogecoin", "dogecoin": "dogecoin",
+            "ada": "cardano", "cardano": "cardano",
+            "dot": "polkadot",
+            "usdt": "tether",
+            "usdc": "usd-coin",
+        }
+        key = symbol.lower().strip()
+        coin_id = mapping.get(key, key)
+        url = (
+            f"https://api.coingecko.com/api/v3/simple/price"
+            f"?ids={urllib.parse.quote(coin_id)}&vs_currencies=usd,idr"
+            f"&include_24hr_change=true&include_last_updated_at=true"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "AnggiraBot/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode())
+        if coin_id not in data:
+            return f"Crypto '{symbol}' tidak ditemukan. Coba: BTC, ETH, BNB, SOL, XRP, DOGE"
+        info    = data[coin_id]
+        usd     = info.get("usd", 0)
+        idr     = info.get("idr", 0)
+        chg24   = info.get("usd_24h_change", 0)
+        arrow   = "▲" if chg24 >= 0 else "▼"
+        sign    = "+" if chg24 >= 0 else ""
+        return (
+            f"₿ {symbol.upper()} ({coin_id})\n"
+            f"USD: ${usd:,.2f}\n"
+            f"IDR: Rp {idr:,.0f}\n"
+            f"{arrow} 24h: {sign}{chg24:.2f}%"
+        )
+    except Exception as e:
+        return f"Crypto error: {e}"
+
+async def crypto(symbol):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _crypto, symbol)
+
+# ================= TIMER / PENGINGAT =================
+_timers = {}  # task store sederhana
+
+def _set_reminder(menit, pesan):
+    """Buat pengingat sederhana (non-persistent, in-memory)."""
+    try:
+        m = float(menit)
+        if m <= 0 or m > 480:
+            return "Menit harus antara 1 dan 480."
+        timer_id = len(_timers) + 1
+        _timers[timer_id] = {"menit": m, "pesan": pesan, "dibuat": datetime.now().isoformat()}
+        waktu_selesai = datetime.now() + timedelta(minutes=m)
+        return (
+            f"⏰ Pengingat #{timer_id} disetel!\n"
+            f"Pesan: {pesan}\n"
+            f"Waktu: {waktu_selesai.strftime('%H:%M:%S')}"
+        )
+    except Exception as e:
+        return f"Timer error: {e}"
+
+async def set_reminder(menit, pesan):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _set_reminder, menit, pesan)
+
+# ================= VATICAN NEWS =================
+
+def _translate_mymemory(text, src="en", tgt="id"):
+    """Terjemahkan teks via MyMemory API (gratis, tanpa key, limit 500 karakter/request)."""
+    try:
+        if not text or not text.strip():
+            return text
+        text = text[:450]
+        url = (
+            "https://api.mymemory.translated.net/get"
+            f"?q={urllib.parse.quote(text)}&langpair={src}|{tgt}"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "AnggiraBot/1.0"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode())
+        result = data.get("responseData", {}).get("translatedText", "")
+        if result and result.lower() != text.lower():
+            return result
+        return text
+    except Exception:
+        return text
+
+
+def _get_vatican_news(lang="id", translate=False, limit=5):
+    """
+    Ambil berita Vatican via Google News RSS (filter keyword Vatican/Vatikan).
+    lang      : "id" (Indonesia) atau "en" (Inggris)
+    translate : terjemahkan ke Indonesia jika lang="en"
+    limit     : jumlah berita 1-10 (default 5)
+    """
+    try:
+        # Google News RSS — sama reliabelnya dengan fungsi news() yang sudah jalan
+        if lang == "en":
+            url = "https://news.google.com/rss/search?q=vatican+pope&hl=en&gl=US&ceid=US:en"
+        else:
+            url = "https://news.google.com/rss/search?q=vatikan+paus&hl=id&gl=ID&ceid=ID:id"
+
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            xml = r.read().decode("utf-8", errors="ignore")
+
+        items = re.findall(r"<item>(.*?)</item>", xml, re.DOTALL)
+        if not items:
+            return "Tidak ada berita Vatican saat ini."
+
+        results = []
+        for item in items[:limit]:
+            # Judul
+            title_m = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", item, re.DOTALL)
+            title = re.sub(r"<[^>]+>", "", title_m.group(1)).strip() if title_m else ""
+
+            # Sumber berita (misal: Vatican News - CNN)
+            source_m = re.search(r"<source[^>]*>(.*?)</source>", item, re.DOTALL)
+            source = source_m.group(1).strip() if source_m else ""
+
+            # Tanggal
+            date_m = re.search(r"<pubDate>(.*?)</pubDate>", item)
+            date = ""
+            if date_m:
+                try:
+                    from email.utils import parsedate
+                    import time as _time
+                    t = parsedate(date_m.group(1).strip())
+                    if t:
+                        date = _time.strftime("%d %b", t)
+                except Exception:
+                    pass
+
+            if not title:
+                continue
+
+            if translate and lang == "en":
+                title = _translate_mymemory(title, src="en", tgt="id")
+
+            line = f"• [{date}] {title}" if date else f"• {title}"
+            if source:
+                line += f"\n  — {source}"
+            results.append(line)
+
+        if not results:
+            return "Tidak ada berita Vatican yang ditemukan."
+
+        label = "🇮🇩" if lang == "id" else ("🌐 diterjemahkan" if translate else "🌐 Inggris")
+        header = f"✝️ Berita Vatican {label} — {len(results)} terbaru:\n\n"
+        return header + "\n\n".join(results)
+
+    except Exception as e:
+        return f"Vatican News error: {e}"
+
+async def get_vatican_news(lang="id", translate=False, limit=5):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _get_vatican_news, lang, translate, limit)
+
+# ================= BERITA TOPIK =================
+def _get_news_topik(topik, lang="id", limit=5):
+    """
+    Cari berita berdasarkan topik bebas via Google News RSS.
+    Contoh topik: harga minyak, teknologi AI, ekonomi Indonesia, bola, dll.
+    """
+    try:
+        if lang == "en":
+            url = f"https://news.google.com/rss/search?q={urllib.parse.quote(topik)}&hl=en&gl=US&ceid=US:en"
+        else:
+            url = f"https://news.google.com/rss/search?q={urllib.parse.quote(topik)}&hl=id&gl=ID&ceid=ID:id"
+
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            xml = r.read().decode("utf-8", errors="ignore")
+
+        items = re.findall(r"<item>(.*?)</item>", xml, re.DOTALL)
+        if not items:
+            return f"Tidak ada berita tentang '{topik}' saat ini."
+
+        results = []
+        for item in items[:limit]:
+            # Judul
+            title_m = re.search(r"<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</title>", item, re.DOTALL)
+            title = re.sub(r"<[^>]+>", "", title_m.group(1)).strip() if title_m else ""
+
+            # Sumber
+            source_m = re.search(r"<source[^>]*>(.*?)</source>", item)
+            source = source_m.group(1).strip() if source_m else ""
+
+            # Tanggal
+            date_m = re.search(r"<pubDate>(.*?)</pubDate>", item)
+            date = ""
+            if date_m:
+                try:
+                    from email.utils import parsedate
+                    import time as _time
+                    t = parsedate(date_m.group(1).strip())
+                    if t:
+                        date = _time.strftime("%d %b", t)
+                except Exception:
+                    pass
+
+            if not title:
+                continue
+
+            line = f"• [{date}] {title}" if date else f"• {title}"
+            if source:
+                line += f"\n  — {source}"
+            results.append(line)
+
+        if not results:
+            return f"Tidak ada berita tentang '{topik}'."
+
+        header = f"📰 Berita: *{topik}* — {len(results)} terbaru:\n\n"
+        return header + "\n\n".join(results)
+
+    except Exception as e:
+        return f"Berita topik error: {e}"
+
+async def get_news_topik(topik, lang="id", limit=5):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _get_news_topik, topik, lang, limit)
