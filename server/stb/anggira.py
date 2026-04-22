@@ -172,85 +172,112 @@ async def handle_mcp():
         print("MCP_ENDPOINT tidak diset")
         return
 
-    async with websockets.connect(MCP_ENDPOINT) as ws:
-        async for message in ws:
-            data = json.loads(message)
-            method = data.get("method", "")
-            msg_id = data.get("id")
+    retry_delay = 3   # detik awal sebelum reconnect
+    max_delay   = 60  # maksimum delay
 
-            if method == "initialize":
-                await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {"protocolVersion": "2024-11-05"}}))
+    while True:
+        try:
+            print(f"MCP: mencoba connect ke {MCP_ENDPOINT}...")
+            async with websockets.connect(
+                MCP_ENDPOINT,
+                ping_interval=20,
+                ping_timeout=10,
+                close_timeout=5,
+            ) as ws:
+                print("MCP: terhubung ✓")
+                retry_delay = 3  # reset setelah connect berhasil
+                async for message in ws:
+                    try:
+                        data = json.loads(message)
+                        method = data.get("method", "")
+                        msg_id = data.get("id")
 
-            elif method == "tools/list":
-                await ws.send(json.dumps({
-                    "jsonrpc": "2.0", "id": msg_id,
-                    "result": {
-                        "tools": [
-                            {"name": "lamp_on"}, {"name": "lamp_off"}, {"name": "news"}, {"name": "weather"}, {"name": "time"},
-                            {"name": "sensor_rumah"}, {"name": "get_schedule"}, {"name": "set_schedule"},
-                            {"name": "play_song", "description": "Putar lagu via speaker ESP32", "inputSchema": {"type": "object", "properties": {"song": {"type": "string"}, "artist": {"type": "string"}}, "required": ["song"]}},
-                            {"name": "play_song_stb", "description": "Putar lagu di STB/TV", "inputSchema": {"type": "object", "properties": {"song": {"type": "string"}, "artist": {"type": "string"}}, "required": ["song"]}},
-                            {"name": "stop_song_stb", "description": "Hentikan musik STB", "inputSchema": {"type": "object", "properties": {}}},
-                            {"name": "play_radio", "description": "Putar radio via ESP32", "inputSchema": {"type": "object", "properties": {"station": {"type": "string"}}, "required": ["station"]}},
-                            {"name": "play_radio_stb", "description": "Putar radio di STB/TV", "inputSchema": {"type": "object", "properties": {"station": {"type": "string"}}, "required": ["station"]}},
-                            {"name": "stop_radio", "description": "Hentikan radio ESP32", "inputSchema": {"type": "object", "properties": {}}},
-                            {"name": "stop_radio_stb", "description": "Hentikan radio STB", "inputSchema": {"type": "object", "properties": {}}},
-                            {"name": "list_radio", "description": "Daftar radio", "inputSchema": {"type": "object", "properties": {}}},
-                            {"name": "get_calendar", "description": "Lihat jadwal", "inputSchema": {"type": "object", "properties": {"days_ahead": {"type": "integer"}}}},
-                            {"name": "wikipedia", "description": "Cari informasi dari Wikipedia. Gunakan untuk pertanyaan faktual, sejarah, tokoh, sains, geografi, dll.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "Topik yang dicari"}, "lang": {"type": "string", "description": "Bahasa: id atau en (default: id)"}}, "required": ["query"]}},
-                            {"name": "web_search", "description": "Cari informasi terkini di internet. Gunakan untuk berita terbaru atau info yang tidak ada di Wikipedia.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
-                            {"name": "kurs", "description": "Cek kurs/nilai tukar mata uang realtime. Contoh: USD ke IDR, EUR ke IDR.", "inputSchema": {"type": "object", "properties": {"from_currency": {"type": "string", "description": "Mata uang asal (USD, EUR, SGD, JPY, dll)"}, "to_currency": {"type": "string", "description": "Mata uang tujuan (IDR, USD, dll)"}, "amount": {"type": "string", "description": "Jumlah (default: 1)"}}, "required": ["from_currency", "to_currency"]}},
-                            {"name": "saham", "description": "Cek harga saham atau indeks pasar. Gunakan simbol: ^JKSE (IHSG), ^GSPC (S&P500), ^IXIC (Nasdaq), BBCA.JK, TLKM.JK, AAPL, GOOGL, dll.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string", "description": "Simbol saham atau indeks"}}, "required": ["symbol"]}},
-                            {"name": "indeks_saham", "description": "Cek indeks pasar saham dengan nama populer: IHSG, S&P500, Nasdaq, Dow, Nikkei, HangSeng, dll.", "inputSchema": {"type": "object", "properties": {"nama": {"type": "string", "description": "Nama indeks: IHSG, S&P500, Nasdaq, Dow, Nikkei, HangSeng, FTSE, DAX, dll."}}, "required": ["nama"]}},
-                            {"name": "crypto", "description": "Cek harga mata uang kripto dalam USD dan IDR. Contoh: BTC, ETH, BNB, SOL, XRP, DOGE.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string", "description": "Simbol kripto: BTC, ETH, BNB, SOL, XRP, DOGE, ADA, dll."}}, "required": ["symbol"]}},
-                            {"name": "kalkulator", "description": "Hitung ekspresi matematika. Mendukung +, -, *, /, ^, sin, cos, tan, sqrt, log, log10, exp, factorial, pi, e.", "inputSchema": {"type": "object", "properties": {"expression": {"type": "string", "description": "Ekspresi: 2^10, sqrt(144), sin(pi/2), log(100), 5!"}}, "required": ["expression"]}},
-                            {"name": "world_time", "description": "Cek waktu saat ini di kota atau negara lain.", "inputSchema": {"type": "object", "properties": {"timezone": {"type": "string", "description": "Nama kota (Tokyo, London, New York, Dubai, Singapore, Mekah) atau timezone IANA (Asia/Tokyo, Europe/London)"}}, "required": ["timezone"]}},
-                            {"name": "cuaca_detail", "description": "Cuaca lengkap suatu kota: suhu, kelembaban, angin, tekanan, waktu matahari terbit/terbenam.", "inputSchema": {"type": "object", "properties": {"city": {"type": "string", "description": "Nama kota"}}, "required": ["city"]}},
-                            {"name": "pengingat", "description": "Setel pengingat/timer dalam menit.", "inputSchema": {"type": "object", "properties": {"menit": {"type": "string", "description": "Jumlah menit (1-480)"}, "pesan": {"type": "string", "description": "Pesan pengingat"}}, "required": ["menit", "pesan"]}},
-                            {"name": "add_calendar_event", "description": "Tambah event", "inputSchema": {"type": "object", "properties": {"summary": {"type": "string"}, "start_datetime": {"type": "string"}, "end_datetime": {"type": "string"}, "description": {"type": "string"}, "location": {"type": "string"}}, "required": ["summary", "start_datetime"]}},
-                            {"name": "vatican_news", "description": "Berita terbaru dari Vatican News. Gunakan untuk berita Paus, Gereja Katolik, dan Vatikan. Parameter lang: id (Indonesia, default) atau en (Inggris). Parameter translate: true untuk terjemahkan berita Inggris ke Indonesia. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"lang": {"type": "string", "description": "Bahasa feed: id atau en (default: id)"}, "translate": {"type": "boolean", "description": "Terjemahkan ke Indonesia (hanya berlaku jika lang=en)"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10, default 5)"}}, "required": []}},
-                            {"name": "berita_topik", "description": "Cari berita terbaru berdasarkan topik bebas via Google News. Gunakan untuk: berita ekonomi, harga minyak, teknologi, olahraga, politik, hiburan, atau topik apapun yang diminta user. Parameter topik: kata kunci berita (contoh: harga minyak dunia, AI teknologi, ekonomi Indonesia). Parameter lang: id (default) atau en. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"topik": {"type": "string", "description": "Topik atau kata kunci berita"}, "lang": {"type": "string", "description": "Bahasa: id atau en"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10)"}}, "required": ["topik"]}}
-                        ]
-                    }
-                }))
+                        if method == "initialize":
+                            await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {"protocolVersion": "2024-11-05"}}))
 
-            elif method == "tools/call":
-                tool = data["params"]["name"]
-                args = data["params"].get("arguments", {})
+                        elif method == "tools/list":
+                            await ws.send(json.dumps({
+                                "jsonrpc": "2.0", "id": msg_id,
+                                "result": {
+                                    "tools": [
+                                        {"name": "lamp_on"}, {"name": "lamp_off"}, {"name": "news"}, {"name": "weather"}, {"name": "time"},
+                                        {"name": "sensor_rumah"}, {"name": "get_schedule"}, {"name": "set_schedule"},
+                                        {"name": "play_song", "description": "Putar lagu via speaker ESP32", "inputSchema": {"type": "object", "properties": {"song": {"type": "string"}, "artist": {"type": "string"}}, "required": ["song"]}},
+                                        {"name": "play_song_stb", "description": "Putar lagu di STB/TV", "inputSchema": {"type": "object", "properties": {"song": {"type": "string"}, "artist": {"type": "string"}}, "required": ["song"]}},
+                                        {"name": "stop_song_stb", "description": "Hentikan musik STB", "inputSchema": {"type": "object", "properties": {}}},
+                                        {"name": "play_radio", "description": "Putar radio via ESP32", "inputSchema": {"type": "object", "properties": {"station": {"type": "string"}}, "required": ["station"]}},
+                                        {"name": "play_radio_stb", "description": "Putar radio di STB/TV", "inputSchema": {"type": "object", "properties": {"station": {"type": "string"}}, "required": ["station"]}},
+                                        {"name": "stop_radio", "description": "Hentikan radio ESP32", "inputSchema": {"type": "object", "properties": {}}},
+                                        {"name": "stop_radio_stb", "description": "Hentikan radio STB", "inputSchema": {"type": "object", "properties": {}}},
+                                        {"name": "list_radio", "description": "Daftar radio", "inputSchema": {"type": "object", "properties": {}}},
+                                        {"name": "get_calendar", "description": "Lihat jadwal", "inputSchema": {"type": "object", "properties": {"days_ahead": {"type": "integer"}}}},
+                                        {"name": "wikipedia", "description": "Cari informasi dari Wikipedia. Gunakan untuk pertanyaan faktual, sejarah, tokoh, sains, geografi, dll.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string", "description": "Topik yang dicari"}, "lang": {"type": "string", "description": "Bahasa: id atau en (default: id)"}}, "required": ["query"]}},
+                                        {"name": "web_search", "description": "Cari informasi terkini di internet. Gunakan untuk berita terbaru atau info yang tidak ada di Wikipedia.", "inputSchema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+                                        {"name": "kurs", "description": "Cek kurs/nilai tukar mata uang realtime. Contoh: USD ke IDR, EUR ke IDR.", "inputSchema": {"type": "object", "properties": {"from_currency": {"type": "string", "description": "Mata uang asal (USD, EUR, SGD, JPY, dll)"}, "to_currency": {"type": "string", "description": "Mata uang tujuan (IDR, USD, dll)"}, "amount": {"type": "string", "description": "Jumlah (default: 1)"}}, "required": ["from_currency", "to_currency"]}},
+                                        {"name": "saham", "description": "Cek harga saham atau indeks pasar. Gunakan simbol: ^JKSE (IHSG), ^GSPC (S&P500), ^IXIC (Nasdaq), BBCA.JK, TLKM.JK, AAPL, GOOGL, dll.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string", "description": "Simbol saham atau indeks"}}, "required": ["symbol"]}},
+                                        {"name": "indeks_saham", "description": "Cek indeks pasar saham dengan nama populer: IHSG, S&P500, Nasdaq, Dow, Nikkei, HangSeng, dll.", "inputSchema": {"type": "object", "properties": {"nama": {"type": "string", "description": "Nama indeks: IHSG, S&P500, Nasdaq, Dow, Nikkei, HangSeng, FTSE, DAX, dll."}}, "required": ["nama"]}},
+                                        {"name": "crypto", "description": "Cek harga mata uang kripto dalam USD dan IDR. Contoh: BTC, ETH, BNB, SOL, XRP, DOGE.", "inputSchema": {"type": "object", "properties": {"symbol": {"type": "string", "description": "Simbol kripto: BTC, ETH, BNB, SOL, XRP, DOGE, ADA, dll."}}, "required": ["symbol"]}},
+                                        {"name": "kalkulator", "description": "Hitung ekspresi matematika. Mendukung +, -, *, /, ^, sin, cos, tan, sqrt, log, log10, exp, factorial, pi, e.", "inputSchema": {"type": "object", "properties": {"expression": {"type": "string", "description": "Ekspresi: 2^10, sqrt(144), sin(pi/2), log(100), 5!"}}, "required": ["expression"]}},
+                                        {"name": "world_time", "description": "Cek waktu saat ini di kota atau negara lain.", "inputSchema": {"type": "object", "properties": {"timezone": {"type": "string", "description": "Nama kota (Tokyo, London, New York, Dubai, Singapore, Mekah) atau timezone IANA (Asia/Tokyo, Europe/London)"}}, "required": ["timezone"]}},
+                                        {"name": "cuaca_detail", "description": "Cuaca lengkap suatu kota: suhu, kelembaban, angin, tekanan, waktu matahari terbit/terbenam.", "inputSchema": {"type": "object", "properties": {"city": {"type": "string", "description": "Nama kota"}}, "required": ["city"]}},
+                                        {"name": "pengingat", "description": "Setel pengingat/timer dalam menit.", "inputSchema": {"type": "object", "properties": {"menit": {"type": "string", "description": "Jumlah menit (1-480)"}, "pesan": {"type": "string", "description": "Pesan pengingat"}}, "required": ["menit", "pesan"]}},
+                                        {"name": "add_calendar_event", "description": "Tambah event", "inputSchema": {"type": "object", "properties": {"summary": {"type": "string"}, "start_datetime": {"type": "string"}, "end_datetime": {"type": "string"}, "description": {"type": "string"}, "location": {"type": "string"}}, "required": ["summary", "start_datetime"]}},
+                                        {"name": "vatican_news", "description": "Berita terbaru dari Vatican News. Gunakan untuk berita Paus, Gereja Katolik, dan Vatikan. Parameter lang: id (Indonesia, default) atau en (Inggris). Parameter translate: true untuk terjemahkan berita Inggris ke Indonesia. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"lang": {"type": "string", "description": "Bahasa feed: id atau en (default: id)"}, "translate": {"type": "boolean", "description": "Terjemahkan ke Indonesia (hanya berlaku jika lang=en)"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10, default 5)"}}, "required": []}},
+                                        {"name": "berita_topik", "description": "Cari berita terbaru berdasarkan topik bebas via Google News. Gunakan untuk: berita ekonomi, harga minyak, teknologi, olahraga, politik, hiburan, atau topik apapun yang diminta user. Parameter topik: kata kunci berita (contoh: harga minyak dunia, AI teknologi, ekonomi Indonesia). Parameter lang: id (default) atau en. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"topik": {"type": "string", "description": "Topik atau kata kunci berita"}, "lang": {"type": "string", "description": "Bahasa: id atau en"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10)"}}, "required": ["topik"]}}
+                                    ]
+                                }
+                            }))
 
-                if tool == "lamp_on": result = await lamp_on()
-                elif tool == "lamp_off": result = await lamp_off()
-                elif tool == "news": result = await get_news()
-                elif tool == "weather": result = await get_weather(DEFAULT_CITY)
-                elif tool == "time": result = await get_time()
-                elif tool == "sensor_rumah": result = await get_sensor_rumah()
-                elif tool == "get_schedule": result = await get_schedule()
-                elif tool == "set_schedule": result = await set_schedule(args.get("on", "18:00"), args.get("off", "06:00"))
-                elif tool == "play_song": result = await play_song(args.get("song", ""), args.get("artist", ""))
-                elif tool == "play_song_stb": result = await play_song_stb(args.get("song", ""), args.get("artist", ""))
-                elif tool == "stop_song_stb": result = await stop_song_stb()
-                elif tool == "play_radio": result = await play_radio(args.get("station", ""))
-                elif tool == "play_radio_stb": result = await play_radio_stb(args.get("station", ""))
-                elif tool == "stop_radio": result = await stop_radio()
-                elif tool == "stop_radio_stb": result = await stop_radio_stb()
-                elif tool == "list_radio": result = await get_radio_list()
-                elif tool == "get_calendar": result = await get_calendar(int(args.get("days_ahead", 7)))
-                elif tool == "add_calendar_event": result = await add_calendar_event(args.get("summary", ""), args.get("start_datetime", ""), args.get("end_datetime"), args.get("description", ""), args.get("location", ""))
-                elif tool == "wikipedia": result = await wikipedia(args.get("query", ""), args.get("lang", "id"))
-                elif tool == "web_search": result = await web_search(args.get("query", ""))
-                elif tool == "kurs": result = await kurs(args.get("from_currency", "USD"), args.get("to_currency", "IDR"), float(args.get("amount", 1)))
-                elif tool == "saham": result = await saham(args.get("symbol", ""))
-                elif tool == "indeks_saham": result = await indeks_saham(args.get("nama", ""))
-                elif tool == "crypto": result = await crypto(args.get("symbol", "BTC"))
-                elif tool == "kalkulator": result = await kalkulator(args.get("expression", ""))
-                elif tool == "world_time": result = await world_time(args.get("timezone", "Asia/Jakarta"))
-                elif tool == "cuaca_detail": result = await get_weather_detail(args.get("city", DEFAULT_CITY))
-                elif tool == "pengingat": result = await set_reminder(args.get("menit", 5), args.get("pesan", "Pengingat"))
-                elif tool == "vatican_news": result = await get_vatican_news(args.get("lang", "id"), args.get("translate", False), int(args.get("limit", 5)))
-                elif tool == "berita_topik": result = await get_news_topik(args.get("topik", ""), args.get("lang", "id"), int(args.get("limit", 5)))
-                else: result = "Tool tidak dikenal"
+                        elif method == "tools/call":
+                            tool = data["params"]["name"]
+                            args = data["params"].get("arguments", {})
 
-                await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": str(result)}]}}))
+                            if tool == "lamp_on": result = await lamp_on()
+                            elif tool == "lamp_off": result = await lamp_off()
+                            elif tool == "news": result = await get_news()
+                            elif tool == "weather": result = await get_weather(DEFAULT_CITY)
+                            elif tool == "time": result = await get_time()
+                            elif tool == "sensor_rumah": result = await get_sensor_rumah()
+                            elif tool == "get_schedule": result = await get_schedule()
+                            elif tool == "set_schedule": result = await set_schedule(args.get("on", "18:00"), args.get("off", "06:00"))
+                            elif tool == "play_song": result = await play_song(args.get("song", ""), args.get("artist", ""))
+                            elif tool == "play_song_stb": result = await play_song_stb(args.get("song", ""), args.get("artist", ""))
+                            elif tool == "stop_song_stb": result = await stop_song_stb()
+                            elif tool == "play_radio": result = await play_radio(args.get("station", ""))
+                            elif tool == "play_radio_stb": result = await play_radio_stb(args.get("station", ""))
+                            elif tool == "stop_radio": result = await stop_radio()
+                            elif tool == "stop_radio_stb": result = await stop_radio_stb()
+                            elif tool == "list_radio": result = await get_radio_list()
+                            elif tool == "get_calendar": result = await get_calendar(int(args.get("days_ahead", 7)))
+                            elif tool == "add_calendar_event": result = await add_calendar_event(args.get("summary", ""), args.get("start_datetime", ""), args.get("end_datetime"), args.get("description", ""), args.get("location", ""))
+                            elif tool == "wikipedia": result = await wikipedia(args.get("query", ""), args.get("lang", "id"))
+                            elif tool == "web_search": result = await web_search(args.get("query", ""))
+                            elif tool == "kurs": result = await kurs(args.get("from_currency", "USD"), args.get("to_currency", "IDR"), float(args.get("amount", 1)))
+                            elif tool == "saham": result = await saham(args.get("symbol", ""))
+                            elif tool == "indeks_saham": result = await indeks_saham(args.get("nama", ""))
+                            elif tool == "crypto": result = await crypto(args.get("symbol", "BTC"))
+                            elif tool == "kalkulator": result = await kalkulator(args.get("expression", ""))
+                            elif tool == "world_time": result = await world_time(args.get("timezone", "Asia/Jakarta"))
+                            elif tool == "cuaca_detail": result = await get_weather_detail(args.get("city", DEFAULT_CITY))
+                            elif tool == "pengingat": result = await set_reminder(args.get("menit", 5), args.get("pesan", "Pengingat"))
+                            elif tool == "vatican_news": result = await get_vatican_news(args.get("lang", "id"), args.get("translate", False), int(args.get("limit", 5)))
+                            elif tool == "berita_topik": result = await get_news_topik(args.get("topik", ""), args.get("lang", "id"), int(args.get("limit", 5)))
+                            else: result = "Tool tidak dikenal"
+
+                            await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": str(result)}]}}))
+
+                    except Exception as e:
+                        print(f"MCP: error proses pesan: {e}")
+
+        except (websockets.exceptions.ConnectionClosed,
+                websockets.exceptions.WebSocketException,
+                OSError, ConnectionRefusedError) as e:
+            print(f"MCP: koneksi terputus ({e}), reconnect dalam {retry_delay}s...")
+        except Exception as e:
+            print(f"MCP: error tak terduga ({e}), reconnect dalam {retry_delay}s...")
+
+        await asyncio.sleep(retry_delay)
+        retry_delay = min(retry_delay * 2, max_delay)  # exponential backoff
 
 # ================= MAIN =================
 async def main():
