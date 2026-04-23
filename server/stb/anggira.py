@@ -5,6 +5,7 @@ import urllib.request
 import urllib.error
 from datetime import datetime
 import threading
+import os
 
 # Import dari services.py
 from services import (
@@ -17,11 +18,74 @@ from services import (
     get_weather, get_weather_detail, get_news, get_time,
     get_calendar, add_calendar_event,
     wikipedia, kurs, saham, indeks_saham, kalkulator,
-    web_search, world_time, crypto, set_reminder,
+    web_search, world_time, crypto,
     tts_stb, TELEGRAM_STB_TOKEN, DEFAULT_CITY, MCP_ENDPOINT,
     get_vatican_news,
-    get_news_topik
+    get_news_topik,
+    set_reminder_v2, get_alarms, cancel_alarm,
+    start_scheduler
 )
+
+# ================= CHIME CONFIG =================
+HOME        = os.path.expanduser("~")
+CONFIG_FILE = os.path.join(HOME, "anggira", "dashboard_config.json")
+
+DEFAULT_CHIME_CONFIG = {
+    "chime_enabled": True,
+    "chime_text":    "jam berapa sekarang dan kapan hujan di cebongan salatiga",
+    "chime_hours":   list(range(6, 22)),
+}
+
+def load_chime_config():
+    """Baca config chime dari dashboard_config.json."""
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE) as f:
+                c = json.load(f)
+            for k, v in DEFAULT_CHIME_CONFIG.items():
+                c.setdefault(k, v)
+            return c
+        except Exception as e:
+            print(f"Chime config error: {e}")
+    return DEFAULT_CHIME_CONFIG.copy()
+
+def esp32_say_http(text: str) -> bool:
+    """Kirim perintah langsung ke ESP32 via HTTP /say."""
+    try:
+        ip   = os.environ.get("ESP32_IP", "192.168.1.222")
+        port = os.environ.get("ESP32_PORT", "8080")
+        url  = f"http://{ip}:{port}/say"
+        payload = json.dumps({"text": text}).encode()
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            resp = json.loads(r.read().decode())
+            return resp.get("status") == "ok"
+    except Exception as e:
+        print(f"Chime esp32_say error: {e}")
+        return False
+
+def esp32_wake_http() -> bool:
+    """Wake ESP32 sebelum kirim say."""
+    try:
+        ip   = os.environ.get("ESP32_IP", "192.168.1.222")
+        port = os.environ.get("ESP32_PORT", "8080")
+        url  = f"http://{ip}:{port}/wake"
+        payload = json.dumps({"wake_word": "Hi ESP"}).encode()
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            resp = json.loads(r.read().decode())
+            return resp.get("status") == "ok"
+    except Exception as e:
+        print(f"Chime wake error: {e}")
+        return False
 
 # ================= TELEGRAM BOT =================
 stb_conversations = {}
@@ -220,10 +284,13 @@ async def handle_mcp():
                                         {"name": "kalkulator", "description": "Hitung ekspresi matematika. Mendukung +, -, *, /, ^, sin, cos, tan, sqrt, log, log10, exp, factorial, pi, e.", "inputSchema": {"type": "object", "properties": {"expression": {"type": "string", "description": "Ekspresi: 2^10, sqrt(144), sin(pi/2), log(100), 5!"}}, "required": ["expression"]}},
                                         {"name": "world_time", "description": "Cek waktu saat ini di kota atau negara lain.", "inputSchema": {"type": "object", "properties": {"timezone": {"type": "string", "description": "Nama kota (Tokyo, London, New York, Dubai, Singapore, Mekah) atau timezone IANA (Asia/Tokyo, Europe/London)"}}, "required": ["timezone"]}},
                                         {"name": "cuaca_detail", "description": "Cuaca lengkap suatu kota: suhu, kelembaban, angin, tekanan, waktu matahari terbit/terbenam.", "inputSchema": {"type": "object", "properties": {"city": {"type": "string", "description": "Nama kota"}}, "required": ["city"]}},
-                                        {"name": "pengingat", "description": "Setel pengingat/timer dalam menit.", "inputSchema": {"type": "object", "properties": {"menit": {"type": "string", "description": "Jumlah menit (1-480)"}, "pesan": {"type": "string", "description": "Pesan pengingat"}}, "required": ["menit", "pesan"]}},
+                                        
                                         {"name": "add_calendar_event", "description": "Tambah event", "inputSchema": {"type": "object", "properties": {"summary": {"type": "string"}, "start_datetime": {"type": "string"}, "end_datetime": {"type": "string"}, "description": {"type": "string"}, "location": {"type": "string"}}, "required": ["summary", "start_datetime"]}},
                                         {"name": "vatican_news", "description": "Berita terbaru dari Vatican News. Gunakan untuk berita Paus, Gereja Katolik, dan Vatikan. Parameter lang: id (Indonesia, default) atau en (Inggris). Parameter translate: true untuk terjemahkan berita Inggris ke Indonesia. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"lang": {"type": "string", "description": "Bahasa feed: id atau en (default: id)"}, "translate": {"type": "boolean", "description": "Terjemahkan ke Indonesia (hanya berlaku jika lang=en)"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10, default 5)"}}, "required": []}},
-                                        {"name": "berita_topik", "description": "Cari berita terbaru berdasarkan topik bebas via Google News. Gunakan untuk: berita ekonomi, harga minyak, teknologi, olahraga, politik, hiburan, atau topik apapun yang diminta user. Parameter topik: kata kunci berita (contoh: harga minyak dunia, AI teknologi, ekonomi Indonesia). Parameter lang: id (default) atau en. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"topik": {"type": "string", "description": "Topik atau kata kunci berita"}, "lang": {"type": "string", "description": "Bahasa: id atau en"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10)"}}, "required": ["topik"]}}
+                                        {"name": "berita_topik", "description": "Cari berita terbaru berdasarkan topik bebas via Google News. Gunakan untuk: berita ekonomi, harga minyak, teknologi, olahraga, politik, hiburan, atau topik apapun yang diminta user. Parameter topik: kata kunci berita (contoh: harga minyak dunia, AI teknologi, ekonomi Indonesia). Parameter lang: id (default) atau en. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"topik": {"type": "string", "description": "Topik atau kata kunci berita"}, "lang": {"type": "string", "description": "Bahasa: id atau en"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10)"}}, "required": ["topik"]}},
+                            {"name": "pengingat_v2", "description": "Setel pengingat dengan timer nyata — ESP32 akan dibangunkan otomatis dan mengucapkan pesan saat waktunya tiba. Opsional: tambahkan ke Google Calendar. Gunakan ini untuk semua permintaan pengingat/alarm.", "inputSchema": {"type": "object", "properties": {"menit": {"type": "string", "description": "Jumlah menit hingga alarm berbunyi (1-1440)"}, "pesan": {"type": "string", "description": "Pesan pengingat yang akan diucapkan"}, "tambah_kalender": {"type": "boolean", "description": "Tambahkan ke Google Calendar (default: false)"}}, "required": ["menit", "pesan"]}},
+                            {"name": "lihat_pengingat", "description": "Tampilkan semua pengingat/alarm yang sedang aktif.", "inputSchema": {"type": "object", "properties": {}}},
+                            {"name": "batal_pengingat", "description": "Batalkan pengingat berdasarkan kata kunci dalam pesan.", "inputSchema": {"type": "object", "properties": {"keyword": {"type": "string", "description": "Kata kunci dari pesan pengingat yang akan dibatalkan"}}, "required": ["keyword"]}}
                                     ]
                                 }
                             }))
@@ -259,9 +326,11 @@ async def handle_mcp():
                             elif tool == "kalkulator": result = await kalkulator(args.get("expression", ""))
                             elif tool == "world_time": result = await world_time(args.get("timezone", "Asia/Jakarta"))
                             elif tool == "cuaca_detail": result = await get_weather_detail(args.get("city", DEFAULT_CITY))
-                            elif tool == "pengingat": result = await set_reminder(args.get("menit", 5), args.get("pesan", "Pengingat"))
                             elif tool == "vatican_news": result = await get_vatican_news(args.get("lang", "id"), args.get("translate", False), int(args.get("limit", 5)))
                             elif tool == "berita_topik": result = await get_news_topik(args.get("topik", ""), args.get("lang", "id"), int(args.get("limit", 5)))
+                            elif tool == "pengingat_v2": result = await set_reminder_v2(args.get("menit", 5), args.get("pesan", "Pengingat"), args.get("tambah_kalender", False))
+                            elif tool == "lihat_pengingat": result = await get_alarms()
+                            elif tool == "batal_pengingat": result = await cancel_alarm(args.get("keyword", ""))
                             else: result = "Tool tidak dikenal"
 
                             await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": str(result)}]}}))
@@ -279,10 +348,63 @@ async def handle_mcp():
         await asyncio.sleep(retry_delay)
         retry_delay = min(retry_delay * 2, max_delay)  # exponential backoff
 
+# ================= CHIME LOOP =================
+async def handle_chime():
+    """
+    Loop async yang cek waktu setiap menit.
+    Jika jam sekarang ada di chime_hours dan menit == 0 → wake + say ke ESP32.
+    Config dibaca langsung dari dashboard_config.json setiap cek,
+    sehingga perubahan dari dashboard langsung berlaku tanpa restart.
+    """
+    import asyncio as _asyncio
+
+    last_triggered_hour = -1   # hindari double-trigger dalam 1 jam
+
+    print("Chime loop aktif ✓")
+
+    while True:
+        try:
+            now  = datetime.now()
+            hour = now.hour
+            mnt  = now.minute
+
+            if mnt == 0 and hour != last_triggered_hour:
+                cfg = load_chime_config()
+
+                if cfg.get("chime_enabled") and hour in cfg.get("chime_hours", []):
+                    text = cfg.get("chime_text", DEFAULT_CHIME_CONFIG["chime_text"])
+                    print(f"Chime: jam {hour:02d}:00 → '{text}'")
+
+                    # Wake dulu, tunggu 2 detik, baru say
+                    loop = _asyncio.get_event_loop()
+                    ok_wake = await loop.run_in_executor(None, esp32_wake_http)
+                    if ok_wake:
+                        await _asyncio.sleep(2)
+                        ok_say = await loop.run_in_executor(None, esp32_say_http, text)
+                        print(f"Chime: say {'OK ✓' if ok_say else 'GAGAL ✗'}")
+                    else:
+                        print("Chime: ESP32 tidak merespons wake, skip")
+
+                    last_triggered_hour = hour
+                else:
+                    if mnt == 0:
+                        cfg = load_chime_config()
+                        reason = "disabled" if not cfg.get("chime_enabled") else f"jam {hour} tidak aktif"
+                        print(f"Chime: jam {hour:02d}:00 — skip ({reason})")
+                    last_triggered_hour = hour  # tetap update agar tidak re-check
+
+        except Exception as e:
+            print(f"Chime loop error: {e}")
+
+        # Tidur 30 detik — akurat cukup untuk menangkap menit ke-0
+        await _asyncio.sleep(30)
+
+
 # ================= MAIN =================
 async def main():
     print("Anggira IOT Home System")
-    await asyncio.gather(handle_mcp(), handle_telegram_stb())
+    start_scheduler()
+    await asyncio.gather(handle_mcp(), handle_telegram_stb(), handle_chime())
 
 if __name__ == "__main__":
     asyncio.run(main())

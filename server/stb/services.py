@@ -745,28 +745,7 @@ async def crypto(symbol):
     return await loop.run_in_executor(executor, _crypto, symbol)
 
 # ================= TIMER / PENGINGAT =================
-_timers = {}  # task store sederhana
-
-def _set_reminder(menit, pesan):
-    """Buat pengingat sederhana (non-persistent, in-memory)."""
-    try:
-        m = float(menit)
-        if m <= 0 or m > 480:
-            return "Menit harus antara 1 dan 480."
-        timer_id = len(_timers) + 1
-        _timers[timer_id] = {"menit": m, "pesan": pesan, "dibuat": datetime.now().isoformat()}
-        waktu_selesai = datetime.now() + timedelta(minutes=m)
-        return (
-            f"⏰ Pengingat #{timer_id} disetel!\n"
-            f"Pesan: {pesan}\n"
-            f"Waktu: {waktu_selesai.strftime('%H:%M:%S')}"
-        )
-    except Exception as e:
-        return f"Timer error: {e}"
-
-async def set_reminder(menit, pesan):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(executor, _set_reminder, menit, pesan)
+# (diganti oleh set_reminder_v2 di bagian ALARM & SCHEDULER)
 
 # ================= VATICAN NEWS =================
 
@@ -924,3 +903,285 @@ def _get_news_topik(topik, lang="id", limit=5):
 async def get_news_topik(topik, lang="id", limit=5):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(executor, _get_news_topik, topik, lang, limit)
+
+# ================= ALARM & SCHEDULER =================
+import threading
+import time as _time
+from email.utils import parsedate as _parsedate
+
+# Config ESP32 Xiaozhi
+_XIAOZHI_IP   = os.environ.get('ESP32_IP', '192.168.1.222')
+_XIAOZHI_PORT = int(os.environ.get('ESP32_PORT', '8080'))
+_XIAOZHI_WAKE_URL = f"http://{_XIAOZHI_IP}:{_XIAOZHI_PORT}/wake"
+_XIAOZHI_SAY_URL  = f"http://{_XIAOZHI_IP}:{_XIAOZHI_PORT}/say"
+
+# Chat ID untuk notifikasi Telegram
+_ALARM_CHAT_ID = os.environ.get('TELEGRAM_ALLOWED_USER_ID', '').split(',')[0].strip()
+
+# Store alarm in-memory
+_alarms: dict = {}
+_alarm_lock = threading.Lock()
+_scheduler_started = False
+
+# ── Helper: kontrol ESP32 ──────────────────────────────────────
+
+def _xiaozhi_wake():
+    try:
+        payload = json.dumps({"wake_word": "Hi ESP"}).encode()
+        req = urllib.request.Request(
+            _XIAOZHI_WAKE_URL, data=payload,
+            headers={"Content-Type": "application/json"}, method="POST"
+        )
+        urllib.request.urlopen(req, timeout=5)
+        _time.sleep(2)
+        return True
+    except Exception as e:
+        print(f"[Scheduler] Wake ESP32 error: {e}")
+        return False
+
+def _xiaozhi_say(text: str):
+    try:
+        payload = json.dumps({"text": text}).encode()
+        req = urllib.request.Request(
+            _XIAOZHI_SAY_URL, data=payload,
+            headers={"Content-Type": "application/json"}, method="POST"
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"[Scheduler] Say ESP32 error: {e}")
+
+def _telegram_notify(pesan: str):
+    if not _ALARM_CHAT_ID or not TELEGRAM_STB_TOKEN:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_STB_TOKEN}/sendMessage"
+        data = json.dumps({
+            "chat_id": _ALARM_CHAT_ID,
+            "text": pesan,
+            "parse_mode": "Markdown"
+        }).encode()
+        req = urllib.request.Request(url, data=data,
+            headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"[Scheduler] Telegram notify error: {e}")
+
+def _trigger_alarm(ucapan: str, notif: str):
+    """Wake ESP32, ucapkan pesan, dan kirim notif Telegram."""
+    print(f"[Scheduler] TRIGGER: {ucapan}")
+    _telegram_notify(notif)
+    if _xiaozhi_wake():
+        _time.sleep(1)
+        _xiaozhi_say(ucapan)
+
+def _cuaca_singkat():
+    try:
+        url = (
+            f"https://api.openweathermap.org/data/2.5/weather"
+            f"?q={DEFAULT_CITY},ID&appid={OPENWEATHER_API_KEY}&units=metric&lang=id"
+        )
+        with urllib.request.urlopen(url, timeout=6) as r:
+            d = json.loads(r.read().decode())
+        suhu = d['main']['temp']
+        desc = d['weather'][0]['description']
+        return f"suhu {suhu:.0f} derajat, {desc}"
+    except Exception:
+        return ""
+
+# ── Scheduler loop ─────────────────────────────────────────────
+
+def _load_dashboard_config():
+    """Baca config chime dari dashboard_config.json."""
+    cfg_path = os.path.join(os.path.expanduser("~"), "anggira", "dashboard_config.json")
+    default = {"chime_enabled": True,
+               "chime_text": "jam berapa sekarang dan kapan hujan di cebongan salatiga",
+               "chime_hours": list(range(6, 22))}
+    try:
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as f:
+                cfg = json.load(f)
+            for k, v in default.items():
+                cfg.setdefault(k, v)
+            return cfg
+    except Exception:
+        pass
+    return default
+
+def _scheduler_loop():
+    print("[Scheduler] Background scheduler started")
+    calendar_notified = set()  # set event_id yang sudah dinotifikasi
+
+    while True:
+        try:
+            now = datetime.now()
+            now_wib = datetime.now(timezone(timedelta(hours=7)))
+
+            # ── 1. Alarm in-memory ──────────────────────────────
+            with _alarm_lock:
+                to_trigger = [
+                    (aid, a) for aid, a in _alarms.items()
+                    if not a.get("done") and now >= a["waktu"]
+                ]
+                for aid, _ in to_trigger:
+                    _alarms[aid]["done"] = True
+
+            for aid, alarm in to_trigger:
+                ucapan = f"Pengingat! {alarm['pesan']}"
+                notif  = f"⏰ *Pengingat:* {alarm['pesan']}"
+                threading.Thread(
+                    target=_trigger_alarm, args=(ucapan, notif), daemon=True
+                ).start()
+
+            # ── 2. Alarm Google Calendar (5 menit sebelum event) ─
+            try:
+                cal_now = now_wib
+                cal_end = cal_now + timedelta(minutes=6)
+                url = (
+                    "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+                    f"?timeMin={urllib.parse.quote(cal_now.isoformat())}"
+                    f"&timeMax={urllib.parse.quote(cal_end.isoformat())}"
+                    "&maxResults=5&singleEvents=true&orderBy=startTime"
+                )
+                access_token = _get_valid_access_token()
+                req = urllib.request.Request(url, headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                })
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    events = json.loads(r.read().decode()).get("items", [])
+
+                for ev in events:
+                    ev_id = ev.get("id", "")
+                    if ev_id in calendar_notified:
+                        continue
+                    summary = ev.get("summary", "Tanpa judul")
+                    start = ev.get("start", {})
+                    waktu_str = ""
+                    if "dateTime" in start:
+                        dt = datetime.fromisoformat(start["dateTime"])
+                        dt_wib = dt.astimezone(timezone(timedelta(hours=7)))
+                        waktu_str = dt_wib.strftime("%H:%M")
+                    calendar_notified.add(ev_id)
+                    ucapan = f"Pengingat! Sebentar lagi ada jadwal: {summary}" + (f" jam {waktu_str}" if waktu_str else "")
+                    notif  = f"📅 *Jadwal dalam 5 menit:* {summary}" + (f" pukul {waktu_str} WIB" if waktu_str else "")
+                    threading.Thread(
+                        target=_trigger_alarm, args=(ucapan, notif), daemon=True
+                    ).start()
+            except Exception as e:
+                if "Belum ada token" not in str(e):
+                    print(f"[Scheduler] Calendar check error: {e}")
+
+            # ── 3. Chime per jam (dari dashboard_config.json) ──
+            if now.minute == 0 and now.hour != last_hour_chime:
+                cfg = _load_dashboard_config()
+                if cfg.get("chime_enabled", True) and now.hour in cfg.get("chime_hours", list(range(6, 22))):
+                    last_hour_chime = now.hour
+                    chime_text = cfg.get("chime_text", "jam berapa sekarang dan kapan hujan di cebongan salatiga")
+                    ucapan = chime_text
+                    notif  = f"🕐 *{now.strftime('%H:%M')} WIB* — chime aktif"
+                    threading.Thread(
+                        target=_trigger_alarm, args=(ucapan, notif), daemon=True
+                    ).start()
+                elif now.minute == 0:
+                    last_hour_chime = now.hour  # mark even jika disabled agar tidak spam
+
+        except Exception as e:
+            print(f"[Scheduler] Loop error: {e}")
+
+        _time.sleep(30)  # cek setiap 30 detik
+
+def start_scheduler():
+    """Mulai background scheduler — panggil sekali dari anggira.py main()."""
+    global _scheduler_started
+    if _scheduler_started:
+        return
+    _scheduler_started = True
+    t = threading.Thread(target=_scheduler_loop, daemon=True)
+    t.start()
+    print("[Scheduler] Started OK")
+
+# ── Fungsi pengingat baru (replace _set_reminder lama) ─────────
+
+def _set_reminder_v2(menit, pesan, tambah_kalender=False):
+    """
+    Setel pengingat dengan timer nyata yang akan wake ESP32.
+    Opsional: tambahkan ke Google Calendar.
+    """
+    try:
+        m = float(menit)
+        if m <= 0 or m > 1440:
+            return "Menit harus antara 1 dan 1440 (24 jam)."
+
+        waktu_alarm = datetime.now() + timedelta(minutes=m)
+        waktu_wib   = waktu_alarm.strftime("%H:%M")
+
+        with _alarm_lock:
+            alarm_id = f"manual_{int(_time.time())}"
+            _alarms[alarm_id] = {
+                "waktu": waktu_alarm,
+                "pesan": pesan,
+                "done":  False
+            }
+
+        hasil = (
+            f"⏰ Pengingat disetel!\n"
+            f"Pesan: {pesan}\n"
+            f"Waktu: {waktu_wib} WIB ({m:.0f} menit lagi)\n"
+            f"ESP32 akan dibangunkan otomatis."
+        )
+
+        # Tambah ke Google Calendar jika diminta
+        if tambah_kalender:
+            try:
+                start_iso = waktu_alarm.astimezone(timezone(timedelta(hours=7))).isoformat()
+                end_iso   = (waktu_alarm + timedelta(minutes=15)).astimezone(timezone(timedelta(hours=7))).isoformat()
+                cal_result = _add_calendar_event(
+                    summary=f"⏰ {pesan}",
+                    start_datetime=start_iso,
+                    end_datetime=end_iso,
+                    description="Pengingat otomatis dari Anggira"
+                )
+                hasil += f"\n✅ Ditambahkan ke Google Calendar"
+            except Exception as e:
+                hasil += f"\n⚠️ Gagal tambah ke Calendar: {e}"
+
+        return hasil
+    except Exception as e:
+        return f"Pengingat error: {e}"
+
+async def set_reminder_v2(menit, pesan, tambah_kalender=False):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, _set_reminder_v2, menit, pesan, tambah_kalender)
+
+def list_alarms():
+    """Tampilkan semua alarm aktif."""
+    with _alarm_lock:
+        aktif = [(aid, a) for aid, a in _alarms.items() if not a.get("done")]
+    if not aktif:
+        return "Tidak ada pengingat aktif saat ini."
+    lines = ["⏰ *Pengingat aktif:*"]
+    for aid, a in aktif:
+        sisa = (a["waktu"] - datetime.now()).total_seconds()
+        mnt  = int(sisa // 60)
+        lines.append(f"• {a['pesan']} — {mnt} menit lagi ({a['waktu'].strftime('%H:%M')})")
+    return "\n".join(lines)
+
+async def get_alarms():
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, list_alarms)
+
+def cancel_alarm_by_keyword(keyword: str):
+    """Batalkan alarm yang pesannya mengandung keyword."""
+    with _alarm_lock:
+        cancelled = []
+        for aid, a in _alarms.items():
+            if not a.get("done") and keyword.lower() in a["pesan"].lower():
+                a["done"] = True
+                cancelled.append(a["pesan"])
+    if cancelled:
+        return "✅ Dibatalkan:\n" + "\n".join(f"• {p}" for p in cancelled)
+    return f"Tidak ada pengingat dengan kata kunci '{keyword}'."
+
+async def cancel_alarm(keyword: str):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, cancel_alarm_by_keyword, keyword)
