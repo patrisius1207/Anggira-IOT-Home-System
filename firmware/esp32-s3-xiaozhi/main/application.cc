@@ -36,6 +36,11 @@ static const char *const STATE_STRINGS[] = {
 
 Application::Application()
 {
+    // Set timezone ke WIB (UTC+7) — DILAKUKAN SEBAGAI PERTAMA
+    // sebelum clock timer atau display apapun berjalan
+    setenv("TZ", kTimezoneWib, 1);
+    tzset();
+
     event_group_ = xEventGroupCreate();
 
 #if CONFIG_USE_DEVICE_AEC && CONFIG_USE_SERVER_AEC
@@ -562,11 +567,6 @@ void Application::Start()
         });
     });
     WakeServer::GetInstance().Start();
-
-    // Set timezone ke WIB (UTC+7) agar localtime_r akurat
-    setenv("TZ", Application::kTimezoneWib, 1);
-    tzset();
-    ESP_LOGI(TAG, "Timezone set to WIB (UTC+%d)", Application::kTimezoneWibOffsetHours);
 
     has_server_time_ = ota.HasServerTime();
     if (protocol_started)
