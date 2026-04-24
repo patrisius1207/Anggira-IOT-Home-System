@@ -1086,7 +1086,7 @@ void Application::SendTextToAIImmediate(const std::string& text)
     SetDeviceState(kDeviceStateIdle);
 
     // Kirim teks sebagai wake word detected — AI akan langsung proses
-    if (protocol_ && protocol_->IsConnected()) {
+    if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->SendWakeWordDetected(text);
     }
 
