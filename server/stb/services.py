@@ -1071,19 +1071,9 @@ def _scheduler_loop():
                 if "Belum ada token" not in str(e):
                     print(f"[Scheduler] Calendar check error: {e}")
 
-            # ── 3. Chime per jam (dari dashboard_config.json) ──
-            if now.minute == 0 and now.hour != last_hour_chime:
-                cfg = _load_dashboard_config()
-                if cfg.get("chime_enabled", True) and now.hour in cfg.get("chime_hours", list(range(6, 22))):
-                    last_hour_chime = now.hour
-                    chime_text = cfg.get("chime_text", "jam berapa sekarang dan kapan hujan di cebongan salatiga")
-                    ucapan = chime_text
-                    notif  = f"🕐 *{now.strftime('%H:%M')} WIB* — chime aktif"
-                    threading.Thread(
-                        target=_trigger_alarm, args=(ucapan, notif), daemon=True
-                    ).start()
-                elif now.minute == 0:
-                    last_hour_chime = now.hour  # mark even jika disabled agar tidak spam
+            # ── 3. Chime per jam (handled natively oleh ESP32 S3 via FetchChimeConfig ke dashboard) ──
+            # ESP32 S3 sudah fetch config dari /api/chime_config setiap jam dan self-trigger.
+            # Tidak perlu duplicate trigger dari sini agar tidak double-chime.
 
         except Exception as e:
             print(f"[Scheduler] Loop error: {e}")

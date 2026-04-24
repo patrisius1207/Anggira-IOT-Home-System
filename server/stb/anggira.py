@@ -23,69 +23,8 @@ from services import (
     get_vatican_news,
     get_news_topik,
     set_reminder_v2, get_alarms, cancel_alarm,
-    start_scheduler
+    start_scheduler,
 )
-
-# ================= CHIME CONFIG =================
-HOME        = os.path.expanduser("~")
-CONFIG_FILE = os.path.join(HOME, "anggira", "dashboard_config.json")
-
-DEFAULT_CHIME_CONFIG = {
-    "chime_enabled": True,
-    "chime_text":    "jam berapa sekarang dan kapan hujan di cebongan salatiga",
-    "chime_hours":   list(range(6, 22)),
-}
-
-def load_chime_config():
-    """Baca config chime dari dashboard_config.json."""
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE) as f:
-                c = json.load(f)
-            for k, v in DEFAULT_CHIME_CONFIG.items():
-                c.setdefault(k, v)
-            return c
-        except Exception as e:
-            print(f"Chime config error: {e}")
-    return DEFAULT_CHIME_CONFIG.copy()
-
-def esp32_say_http(text: str) -> bool:
-    """Kirim perintah langsung ke ESP32 via HTTP /say."""
-    try:
-        ip   = os.environ.get("ESP32_IP", "192.168.1.222")
-        port = os.environ.get("ESP32_PORT", "8080")
-        url  = f"http://{ip}:{port}/say"
-        payload = json.dumps({"text": text}).encode()
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=5) as r:
-            resp = json.loads(r.read().decode())
-            return resp.get("status") == "ok"
-    except Exception as e:
-        print(f"Chime esp32_say error: {e}")
-        return False
-
-def esp32_wake_http() -> bool:
-    """Wake ESP32 sebelum kirim say."""
-    try:
-        ip   = os.environ.get("ESP32_IP", "192.168.1.222")
-        port = os.environ.get("ESP32_PORT", "8080")
-        url  = f"http://{ip}:{port}/wake"
-        payload = json.dumps({"wake_word": "Hi ESP"}).encode()
-        req = urllib.request.Request(
-            url, data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=5) as r:
-            resp = json.loads(r.read().decode())
-            return resp.get("status") == "ok"
-    except Exception as e:
-        print(f"Chime wake error: {e}")
-        return False
 
 # ================= TELEGRAM BOT =================
 stb_conversations = {}
@@ -348,63 +287,11 @@ async def handle_mcp():
         await asyncio.sleep(retry_delay)
         retry_delay = min(retry_delay * 2, max_delay)  # exponential backoff
 
-# ================= CHIME LOOP =================
-async def handle_chime():
-    """
-    Loop async yang cek waktu setiap menit.
-    Jika jam sekarang ada di chime_hours dan menit == 0 → wake + say ke ESP32.
-    Config dibaca langsung dari dashboard_config.json setiap cek,
-    sehingga perubahan dari dashboard langsung berlaku tanpa restart.
-    """
-    import asyncio as _asyncio
-
-    last_triggered_hour = -1   # hindari double-trigger dalam 1 jam
-
-    print("Chime loop aktif ✓")
-
-    while True:
-        try:
-            now  = datetime.now()
-            hour = now.hour
-            mnt  = now.minute
-
-            if mnt == 0 and hour != last_triggered_hour:
-                cfg = load_chime_config()
-
-                if cfg.get("chime_enabled") and hour in cfg.get("chime_hours", []):
-                    text = cfg.get("chime_text", DEFAULT_CHIME_CONFIG["chime_text"])
-                    print(f"Chime: jam {hour:02d}:00 → '{text}'")
-
-                    # Wake dulu, tunggu 2 detik, baru say
-                    loop = _asyncio.get_event_loop()
-                    ok_wake = await loop.run_in_executor(None, esp32_wake_http)
-                    if ok_wake:
-                        await _asyncio.sleep(2)
-                        ok_say = await loop.run_in_executor(None, esp32_say_http, text)
-                        print(f"Chime: say {'OK ✓' if ok_say else 'GAGAL ✗'}")
-                    else:
-                        print("Chime: ESP32 tidak merespons wake, skip")
-
-                    last_triggered_hour = hour
-                else:
-                    if mnt == 0:
-                        cfg = load_chime_config()
-                        reason = "disabled" if not cfg.get("chime_enabled") else f"jam {hour} tidak aktif"
-                        print(f"Chime: jam {hour:02d}:00 — skip ({reason})")
-                    last_triggered_hour = hour  # tetap update agar tidak re-check
-
-        except Exception as e:
-            print(f"Chime loop error: {e}")
-
-        # Tidur 30 detik — akurat cukup untuk menangkap menit ke-0
-        await _asyncio.sleep(30)
-
-
 # ================= MAIN =================
 async def main():
     print("Anggira IOT Home System")
     start_scheduler()
-    await asyncio.gather(handle_mcp(), handle_telegram_stb(), handle_chime())
+    await asyncio.gather(handle_mcp(), handle_telegram_stb())
 
 if __name__ == "__main__":
     asyncio.run(main())
