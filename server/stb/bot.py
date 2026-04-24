@@ -373,7 +373,7 @@ async def handle_chime():
 
 # ── Main ──────────────────────────────────────────────────────
 
-def main():
+async def main():
     if not TELEGRAM_BOT_TOKEN:
         logger.error("❌ TELEGRAM_BOT_TOKEN belum diset! Tambahkan ke ~/.bashrc")
         logger.error("   export TELEGRAM_BOT_TOKEN='token_kamu'")
@@ -393,15 +393,12 @@ def main():
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("Bot berjalan. Kirim 'Hi, ESP' dari Telegram.")
-
     async def run_bot():
         async with app:
             await app.initialize()
             await app.start()
             await app.updater.start_polling(allowed_updates=["message"])
             logger.info("Bot berjalan. Kirim 'Hi, ESP' dari Telegram.")
-            # Jalan terus sampai interrupt
             try:
                 await asyncio.Event().wait()
             finally:
@@ -409,11 +406,11 @@ def main():
                 await app.stop()
                 await app.shutdown()
 
-    try:
-        asyncio.run(asyncio.gather(run_bot(), handle_chime()))
-    except KeyboardInterrupt:
-        logger.info("Bot dihentikan.")
+    await asyncio.gather(run_bot(), handle_chime())
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot dihentikan.")
