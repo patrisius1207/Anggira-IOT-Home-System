@@ -18,21 +18,28 @@ app = Flask(__name__)
 lyric_cache = {}
 
 def get_audio_info(song, artist=""):
-    query = f"{song} {artist}".strip() if artist else song
-    log.info(f"Searching YouTube for: {query}")
+    raw_query = f"{song} {artist}".strip() if artist else song
     ydl_opts = {
         'format': 'bestaudio',
         'quiet': True,
         'noplaylist': True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(f"ytsearch:{query}", download=False)
-        entry = info['entries'][0]
-        log.info(f"Found: {entry.get('title')} ({entry.get('duration')}s)")
+        if song.startswith("http://") or song.startswith("https://"):
+            log.info(f"Fetching audio info from URL: {song}")
+            info = ydl.extract_info(song, download=False)
+            if isinstance(info, dict) and info.get('entries'):
+                info = info['entries'][0]
+        else:
+            log.info(f"Searching YouTube for: {raw_query}")
+            info = ydl.extract_info(f"ytsearch:{raw_query}", download=False)
+            info = info['entries'][0]
+
+        log.info(f"Found: {info.get('title')} ({info.get('duration')}s)")
         return {
-            "url": entry['url'],
-            "title": entry.get('title', song),
-            "artist": entry.get('uploader', artist),
+            "url": info['url'],
+            "title": info.get('title', song),
+            "artist": info.get('uploader', artist),
         }
 
 def fetch_lyrics(song, artist=""):
@@ -394,6 +401,181 @@ def stop_radio():
         else:
             return jsonify({"status": "not_playing"})
 
+
+
+# ================= PLAYLIST =================
+import json as _json
+import os as _os
+
+PLAYLIST_FILE = _os.path.join(_os.path.expanduser("~"), "anggira", "playlists.json")
+
+_playlist_state = {
+    "current_playlist": None,   # nama playlist aktif
+    "queue":            [],     # list of {"song": ..., "artist": ...}
+    "index":            0,      # index lagu sekarang
+    "playing":          False,
+}
+_playlist_lock = threading.Lock()
+
+def _load_playlists() -> dict:
+    if _os.path.exists(PLAYLIST_FILE):
+        try:
+            with open(PLAYLIST_FILE) as f:
+                return _json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def _save_playlists(data: dict):
+    _os.makedirs(_os.path.dirname(PLAYLIST_FILE), exist_ok=True)
+    with open(PLAYLIST_FILE, "w") as f:
+        _json.dump(data, f, indent=2, ensure_ascii=False)
+
+def _play_next_in_playlist():
+    """Putar lagu berikutnya di queue. Dipanggil oleh thread monitor."""
+    global local_player_process
+    with _playlist_lock:
+        state = _playlist_state
+        if not state["playing"] or state["index"] >= len(state["queue"]):
+            state["playing"] = False
+            log.info("Playlist selesai")
+            return
+        track = state["queue"][state["index"]]
+        state["index"] += 1
+
+    song   = track.get("song", "")
+    artist = track.get("artist", "")
+    log.info(f"Playlist: [{state['index']}/{len(state['queue'])}] {song} - {artist}")
+
+    try:
+        info = get_audio_info(song, artist)
+        cmd  = ["mpv", "--no-video", "--audio-device=opensles",
+                "--volume=100", "--really-quiet", info["url"]]
+
+        with local_player_lock:
+            if local_player_process and local_player_process.poll() is None:
+                local_player_process.terminate()
+                try: local_player_process.wait(timeout=3)
+                except subprocess.TimeoutExpired: local_player_process.kill()
+            local_player_process = subprocess.Popen(
+                cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+
+        # Monitor selesai lalu lanjut lagu berikutnya
+        def _monitor(proc):
+            proc.wait()
+            with _playlist_lock:
+                if _playlist_state["playing"]:
+                    _play_next_in_playlist()
+        threading.Thread(target=_monitor, args=(local_player_process,), daemon=True).start()
+
+    except Exception as e:
+        log.error(f"Playlist play error: {e}")
+        # Skip ke lagu berikutnya
+        _play_next_in_playlist()
+
+
+@app.route("/play_playlist")
+def play_playlist():
+    """Mulai putar playlist berdasarkan nama. ?name=santai&shuffle=true"""
+    name    = request.args.get("name", "").strip().lower()
+    shuffle = request.args.get("shuffle", "false").lower() == "true"
+
+    playlists = _load_playlists()
+    # Case-insensitive match
+    key = next((k for k in playlists if k.lower() == name), None)
+    if not key:
+        available = ", ".join(playlists.keys()) or "kosong"
+        return jsonify({"error": f"Playlist '{name}' tidak ada. Tersedia: {available}"}), 404
+
+    tracks = playlists[key].get("tracks", [])
+    if not tracks:
+        return jsonify({"error": "Playlist kosong"}), 400
+
+    if shuffle:
+        import random
+        tracks = tracks.copy()
+        random.shuffle(tracks)
+
+    with _playlist_lock:
+        _playlist_state["current_playlist"] = key
+        _playlist_state["queue"]            = tracks
+        _playlist_state["index"]            = 0
+        _playlist_state["playing"]          = True
+
+    log.info(f"Memulai playlist '{key}' ({len(tracks)} lagu, shuffle={shuffle})")
+    _play_next_in_playlist()
+
+    return jsonify({
+        "status":   "playing",
+        "playlist": key,
+        "total":    len(tracks),
+        "shuffle":  shuffle,
+        "first":    tracks[0].get("song", "") if tracks else ""
+    })
+
+
+@app.route("/playlist_next")
+def playlist_next():
+    """Skip ke lagu berikutnya."""
+    with _playlist_lock:
+        if not _playlist_state["playing"]:
+            return jsonify({"status": "not_playing"})
+
+    # Stop current mpv, monitor akan trigger next otomatis
+    global local_player_process
+    with local_player_lock:
+        if local_player_process and local_player_process.poll() is None:
+            local_player_process.terminate()
+
+    return jsonify({"status": "skipped"})
+
+
+@app.route("/playlist_stop")
+def playlist_stop():
+    """Stop playlist."""
+    global local_player_process
+    with _playlist_lock:
+        _playlist_state["playing"] = False
+        _playlist_state["queue"]   = []
+
+    with local_player_lock:
+        if local_player_process and local_player_process.poll() is None:
+            local_player_process.terminate()
+            try: local_player_process.wait(timeout=3)
+            except subprocess.TimeoutExpired: local_player_process.kill()
+
+    return jsonify({"status": "stopped"})
+
+
+@app.route("/playlist_status")
+def playlist_status():
+    """Status playlist saat ini."""
+    with _playlist_lock:
+        state = _playlist_state
+        idx   = state["index"]
+        queue = state["queue"]
+        current = queue[idx - 1] if idx > 0 and queue else {}
+        return jsonify({
+            "playing":          state["playing"],
+            "playlist":         state["current_playlist"],
+            "current_index":    idx,
+            "total":            len(queue),
+            "current_song":     current.get("song", ""),
+            "current_artist":   current.get("artist", ""),
+        })
+
+
+@app.route("/api/playlists", methods=["GET"])
+def api_get_playlists():
+    return jsonify(_load_playlists())
+
+
+@app.route("/api/playlists", methods=["POST"])
+def api_save_playlists():
+    data = request.get_json()
+    _save_playlists(data)
+    return jsonify({"ok": True})
 
 @app.route("/health")
 def health():

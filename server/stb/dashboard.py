@@ -12,6 +12,7 @@ STREAM_LOG  = os.path.join(HOME, "stream_server.log")
 BOT_LOG     = os.path.join(HOME, "bot.log")
 BASHRC      = os.path.join(HOME, ".bashrc")
 CONFIG_FILE = os.path.join(ANGGIRA_DIR, "dashboard_config.json")
+PLAYLIST_FILE = os.path.join(ANGGIRA_DIR, "playlists.json")
 
 # ── Config keys yang bisa diedit ─────────────────────────────
 ENV_KEYS = [
@@ -52,6 +53,22 @@ def save_config(data: dict):
     os.makedirs(ANGGIRA_DIR, exist_ok=True)
     with open(CONFIG_FILE, "w") as f:
         json.dump(data, f, indent=2)
+
+def load_playlists() -> dict:
+    if os.path.exists(PLAYLIST_FILE):
+        try:
+            with open(PLAYLIST_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_playlists(data: dict):
+    os.makedirs(ANGGIRA_DIR, exist_ok=True)
+    with open(PLAYLIST_FILE, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
 
 def read_env(key: str) -> str:
     """Baca nilai env dari .bashrc."""
@@ -274,6 +291,7 @@ pre{{
   <button class="active" onclick="tab(this,'logs')">📋 Logs</button>
   <button onclick="tab(this,'chime')">🕐 Chime</button>
   <button onclick="tab(this,'tokens')">🔑 Tokens</button>
+  <button onclick="tab(this,'playlist')">🎵 Playlist</button>
   <button onclick="tab(this,'esp32')">📡 ESP32</button>
 </div>
 
@@ -344,6 +362,42 @@ pre{{
   </div>
 </div>
 
+<!-- ═══ PLAYLIST ═══ -->
+<div id="panel-playlist" class="panel">
+  <div class="section">
+    <div class="section-title">🎵 Kelola Playlist</div>
+    <div id="playlist-banner" class="banner" style="display:none"></div>
+
+    <!-- Daftar Playlist -->
+    <div id="playlist-list"></div>
+
+    <!-- Form Tambah/Edit Playlist -->
+    <div class="section" style="margin-top:20px">
+      <div class="section-title">Tambah / Edit Playlist</div>
+      <div class="field">
+        <label>Nama Playlist (kata pendek untuk Xiaozhi)</label>
+        <input type="text" id="pl-name" placeholder="santai, pagi, rohani, dll" style="width:100%">
+      </div>
+      <div class="field">
+        <label>Daftar Lagu (satu baris = satu lagu atau URL YouTube)</label>
+        <textarea id="pl-tracks" rows="10"
+          placeholder="https://youtu.be/dQw4w9WgXcQ&#10;Kangen - Dewa 19&#10;Separuh Aku | Noah"></textarea>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="save-btn" onclick="savePlaylist()">💾 Simpan Playlist</button>
+        <button class="save-btn" style="background:#ff6b35" onclick="deletePlaylist()">🗑 Hapus</button>
+      </div>
+    </div>
+
+    <!-- Test Play -->
+    <div class="section" style="margin-top:20px">
+      <div class="section-title">Test Putar</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap" id="playlist-btns"></div>
+    </div>
+  </div>
+</div>
+
+
 <!-- ═══ ESP32 ═══ -->
 <div id="panel-esp32" class="panel">
   <div class="section">
@@ -379,14 +433,6 @@ pre{{
 </div>
 
 <script>
-// ── Tabs ──────────────────────────────────────────────────────
-function tab(btn, id) {{
-  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('panel-'+id).classList.add('active');
-}}
-
 // ── Logs ─────────────────────────────────────────────────────
 async function loadLog(type) {{
   try {{
@@ -415,6 +461,110 @@ async function saveChime() {{
   }});
   const d = await r.json();
   showBanner('chime-banner', d.ok, d.ok ? '✅ Chime disimpan!' : '❌ ' + d.error);
+}}
+
+// ── Playlist ────────────────────────────────────────────────────
+let _playlists = {{}};
+
+async function loadPlaylists() {{
+  const r = await fetch('/api/playlists');
+  _playlists = await r.json();
+  renderPlaylists();
+}}
+
+function renderPlaylists() {{
+  const list = document.getElementById('playlist-list');
+  const btns = document.getElementById('playlist-btns');
+  if (!list) return;
+
+  if (Object.keys(_playlists).length === 0) {{
+    list.innerHTML = '<p style="color:var(--dim);font-size:12px">Belum ada playlist.</p>';
+    btns.innerHTML = '';
+    return;
+  }}
+
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
+  html += '<tr style="color:var(--dim)"><th style="text-align:left;padding:6px">Nama</th><th>Lagu</th><th>Aksi</th></tr>';
+  for (const [name, pl] of Object.entries(_playlists)) {{
+    const count = (pl.tracks || []).length;
+    html += `<tr style="border-top:1px solid var(--border)">
+      <td style="padding:8px;color:var(--accent)">${{name}}</td>
+      <td style="padding:8px;text-align:center">${{count}}</td>
+      <td style="padding:8px;text-align:center">
+        <button class="save-btn" style="padding:4px 10px;font-size:11px"
+          onclick="editPlaylist('${{name}}')">✏️</button>
+      </td>
+    </tr>`;
+  }}
+  html += '</table>';
+  list.innerHTML = html;
+
+  // Tombol play
+  btns.innerHTML = Object.keys(_playlists).map(name =>
+    `<button class="save-btn" style="background:#00ff88;color:#000;padding:8px 14px"
+      onclick="playPlaylist('${{name}}')">▶ ${{name}}</button>`
+  ).join('');
+}}
+
+function editPlaylist(name) {{
+  const pl = _playlists[name];
+  if (!pl) return;
+  document.getElementById('pl-name').value = name;
+  const tracks = (pl.tracks || []).map(t =>
+    t.artist ? `${{t.song}} | ${{t.artist}}` : t.song
+  ).join('\\n');
+  document.getElementById('pl-tracks').value = tracks;
+}}
+
+async function savePlaylist() {{
+  const name   = document.getElementById('pl-name').value.trim().toLowerCase();
+  const raw    = document.getElementById('pl-tracks').value.trim();
+  if (!name || !raw) {{ alert('Isi nama dan lagu dulu!'); return; }}
+
+  const tracks = raw.split('\\n').filter(l => l.trim()).map(line => {{
+    const [song, artist] = line.split('|').map(s => s.trim());
+    return {{ song: song || line.trim(), artist: artist || '' }};
+  }});
+
+  _playlists[name] = {{ tracks }};
+  const r = await fetch('/api/playlists', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify(_playlists)
+  }});
+  const d = await r.json();
+  showBanner('playlist-banner', d.ok, d.ok ? `✅ Playlist "${{name}}" disimpan (${{tracks.length}} lagu)` : '❌ ' + d.error);
+  if (d.ok) {{ loadPlaylists(); document.getElementById('pl-name').value = ''; document.getElementById('pl-tracks').value = ''; }}
+}}
+
+async function deletePlaylist() {{
+  const name = document.getElementById('pl-name').value.trim().toLowerCase();
+  if (!name || !_playlists[name]) {{ alert('Pilih playlist dulu (klik ✏️)'); return; }}
+  if (!confirm(`Hapus playlist "${{name}}"?`)) return;
+  delete _playlists[name];
+  const r = await fetch('/api/playlists', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify(_playlists)
+  }});
+  const d = await r.json();
+  showBanner('playlist-banner', d.ok, d.ok ? `✅ Playlist "${{name}}" dihapus` : '❌ ' + d.error);
+  if (d.ok) {{ loadPlaylists(); document.getElementById('pl-name').value = ''; document.getElementById('pl-tracks').value = ''; }}
+}}
+
+async function playPlaylist(name) {{
+  const r = await fetch(`http://${{location.hostname}}:8080/play_playlist?name=${{encodeURIComponent(name)}}`);
+  const d = await r.json();
+  showBanner('playlist-banner', !d.error, d.error ? '❌ ' + d.error : `▶ Memutar "${{name}}" (${{d.total}} lagu)`);
+}}
+
+// ── Tabs ──────────────────────────────────────────────────────
+function tab(btn, id) {{
+  document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('panel-'+id).classList.add('active');
+  if (id === 'playlist') loadPlaylists();
 }}
 
 // ── Tokens ────────────────────────────────────────────────────
@@ -527,6 +677,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"ok": False, "status": {"error": str(e)}})
 
+        elif path == "/api/playlists":
+            import urllib.request as ur
+            try:
+                with ur.urlopen("http://127.0.0.1:8080/api/playlists", timeout=3) as r:
+                    data = json.loads(r.read().decode())
+                self.send_json(data)
+            except Exception:
+                self.send_json(load_playlists())
+
         else:
             self.send_response(404)
             self.end_headers()
@@ -599,6 +758,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.send_json({"ok": True})
             except Exception as e:
                 self.send_json({"ok": False, "error": str(e)})
+
+        elif path == "/api/playlists":
+            data = self.read_body()
+            try:
+                import urllib.request as ur
+                payload = json.dumps(data).encode()
+                req = ur.Request("http://127.0.0.1:8080/api/playlists",
+                                 data=payload,
+                                 headers={"Content-Type": "application/json"},
+                                 method="POST")
+                ur.urlopen(req, timeout=3)
+                self.send_json({"ok": True})
+            except Exception:
+                # Fallback: simpan langsung ke file
+                save_playlists(data)
+                self.send_json({"ok": True})
 
         else:
             self.send_response(404)

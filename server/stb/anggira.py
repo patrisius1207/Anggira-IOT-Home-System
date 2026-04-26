@@ -168,6 +168,35 @@ async def handle_telegram_stb():
             print(f"Telegram loop error: {e}")
             await asyncio.sleep(5)
 
+# ================= STREAM SERVER HELPER =================
+async def _call_stream_server(path: str) -> str:
+    import urllib.request as _ur
+    try:
+        url = f"http://127.0.0.1:8080{path}"
+        def _fetch():
+            with _ur.urlopen(url, timeout=10) as r:
+                return r.read().decode()
+        loop = asyncio.get_event_loop()
+        data = await loop.run_in_executor(executor, _fetch)
+        d = json.loads(data)
+        if "error" in d:
+            return f"Error: {d['error']}"
+        if d.get("status") == "playing" and d.get("playlist"):
+            return f"Memutar playlist {d['playlist']} ({d['total']} lagu)"
+        if d.get("status") == "stopped":
+            return "Playlist dihentikan"
+        if d.get("status") == "skipped":
+            return "Lanjut ke lagu berikutnya"
+        if isinstance(d, dict) and not any(k in d for k in ["status","error","playing"]):
+            names = list(d.keys())
+            if not names:
+                return "Belum ada playlist. Buat dulu di dashboard."
+            return "Playlist tersedia: " + ", ".join(names)
+        return json.dumps(d)
+    except Exception as e:
+        return f"Stream server error: {e}"
+
+
 # ================= MCP SERVER =================
 async def handle_mcp():
     if not MCP_ENDPOINT:
@@ -228,6 +257,11 @@ async def handle_mcp():
                                         {"name": "berita_topik", "description": "Cari berita terbaru berdasarkan topik bebas via Google News. Gunakan untuk: berita ekonomi, harga minyak, teknologi, olahraga, politik, hiburan, atau topik apapun yang diminta user. Parameter topik: kata kunci berita (contoh: harga minyak dunia, AI teknologi, ekonomi Indonesia). Parameter lang: id (default) atau en. Parameter limit: jumlah berita 1-10 (default 5).", "inputSchema": {"type": "object", "properties": {"topik": {"type": "string", "description": "Topik atau kata kunci berita"}, "lang": {"type": "string", "description": "Bahasa: id atau en"}, "limit": {"type": "integer", "description": "Jumlah berita (1-10)"}}, "required": ["topik"]}},
                             {"name": "pengingat_v2", "description": "Setel pengingat dengan timer nyata — ESP32 akan dibangunkan otomatis dan mengucapkan pesan saat waktunya tiba. Opsional: tambahkan ke Google Calendar. Gunakan ini untuk semua permintaan pengingat/alarm.", "inputSchema": {"type": "object", "properties": {"menit": {"type": "string", "description": "Jumlah menit hingga alarm berbunyi (1-1440)"}, "pesan": {"type": "string", "description": "Pesan pengingat yang akan diucapkan"}, "tambah_kalender": {"type": "boolean", "description": "Tambahkan ke Google Calendar (default: false)"}}, "required": ["menit", "pesan"]}},
                             {"name": "lihat_pengingat", "description": "Tampilkan semua pengingat/alarm yang sedang aktif.", "inputSchema": {"type": "object", "properties": {}}},
+                            {"name": "play_playlist", "description": "Putar playlist musik berdasarkan nama pendek. Contoh: santai, pagi, rohani.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "shuffle": {"type": "boolean"}}, "required": ["name"]}},
+                            {"name": "playlist_next", "description": "Skip ke lagu berikutnya.", "inputSchema": {"type": "object", "properties": {}}},
+                            {"name": "playlist_stop", "description": "Stop playlist.", "inputSchema": {"type": "object", "properties": {}}},
+                            {"name": "playlist_status", "description": "Cek lagu yang sedang diputar di playlist.", "inputSchema": {"type": "object", "properties": {}}},
+                            {"name": "list_playlists", "description": "Tampilkan semua nama playlist tersedia.", "inputSchema": {"type": "object", "properties": {}}},
                             {"name": "batal_pengingat", "description": "Batalkan pengingat berdasarkan kata kunci dalam pesan.", "inputSchema": {"type": "object", "properties": {"keyword": {"type": "string", "description": "Kata kunci dari pesan pengingat yang akan dibatalkan"}}, "required": ["keyword"]}}
                                     ]
                                 }
@@ -269,6 +303,19 @@ async def handle_mcp():
                             elif tool == "pengingat_v2": result = await set_reminder_v2(args.get("menit", 5), args.get("pesan", "Pengingat"), args.get("tambah_kalender", False))
                             elif tool == "lihat_pengingat": result = await get_alarms()
                             elif tool == "batal_pengingat": result = await cancel_alarm(args.get("keyword", ""))
+                            elif tool == "play_playlist":
+                                name = args.get("name", "")
+                                shuf = "true" if args.get("shuffle") else "false"
+                                import urllib.parse as _up
+                                result = await _call_stream_server(f"/play_playlist?name={_up.quote(name)}&shuffle={shuf}")
+                            elif tool == "playlist_next":
+                                result = await _call_stream_server("/playlist_next")
+                            elif tool == "playlist_stop":
+                                result = await _call_stream_server("/playlist_stop")
+                            elif tool == "playlist_status":
+                                result = await _call_stream_server("/playlist_status")
+                            elif tool == "list_playlists":
+                                result = await _call_stream_server("/api/playlists")
                             else: result = "Tool tidak dikenal"
 
                             await ws.send(json.dumps({"jsonrpc": "2.0", "id": msg_id, "result": {"content": [{"type": "text", "text": str(result)}]}}))
