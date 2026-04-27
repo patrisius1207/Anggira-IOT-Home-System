@@ -21,7 +21,7 @@ Fork & modified from:
 - Wake word: **"Hi, ESP"** (model `wn9_hiesp`)
 - Integration with `stream_server.py` on STB for playing music from YouTube
 - HTTP endpoints `/wake`, `/say`, `/status` for control via Telegram bot
-- MAC Address: `3c:dc:75:6b:f9:ec`
+- MAC Address: `XX:XX:XX:XX:XX:XX` (configure in your device)
 
 ### 📦 Setup
 
@@ -56,7 +56,7 @@ Fork & modifikasi dari:
 - Wake word: **"Hi, ESP"** (model `wn9_hiesp`)
 - Integrasi dengan `stream_server.py` di STB untuk memutar musik dari YouTube
 - HTTP endpoint `/wake`, `/say`, `/status` untuk kontrol via Telegram bot
-- MAC Address: `3c:dc:75:6b:f9:ec`
+- MAC Address: `XX:XX:XX:XX:XX:XX` (konfigurasi di perangkat Anda)
 
 ---
 
