@@ -1,14 +1,20 @@
 # 🖥️ STB Server — Anggira AI Core (Termux/Android)
 
-Server utama yang berjalan di STB Android menggunakan **Termux**. Berisi semua logic AI, bot Telegram, music streaming, dan integrasi sensor.
+<div align="center">
+
+**🌐 [English](#english-version) · 🇮🇩 [Bahasa Indonesia](#versi-bahasa-indonesia)**
+
+[![Python](https://img.shields.io/badge/Python-3.x-blue.svg)](https://www.python.org/)
+[![Termux](https://img.shields.io/badge/Platform-Termux-green.svg)](https://termux.com/)
+[![License](https://img.shields.io/badge/License-MIT-orange.svg)](https://opensource.org/licenses/MIT)
+
+</div>
 
 ---
 
-## 🌐 English Version
+## 🇮🇩 Versi Bahasa Indonesia
 
-**STB Server** — Anggira AI Core (Termux/Android)
-
-Main server running on Android STB using **Termux**. Contains all AI logic, Telegram bot, music streaming, and sensor integration.
+Server utama yang berjalan di STB Android menggunakan **Termux**. Berisi semua logic AI, bot Telegram, music streaming, dan integrasi sensor.
 
 ### 📁 Files
 
@@ -277,3 +283,13 @@ Buka `http://STB_IP:8088` untuk monitor log:
 - **Anggira** — log core AI
 - **Stream** — log music server  
 - **Bot** — log Telegram bot
+
+---
+
+## 🌐 English Version
+
+**STB Server** — Anggira AI Core (Termux/Android)
+
+Main server running on Android STB using **Termux**. Contains all AI logic, Telegram bot, music streaming, and sensor integration.
+
+### 📁 Files

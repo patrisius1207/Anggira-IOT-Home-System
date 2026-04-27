@@ -1,14 +1,19 @@
 # 🤖 Firmware ESP32-S3 — Xiaozhi AI Voice Assistant (Modifikasi)
 
-Firmware ESP32-S3 yang dimodifikasi dari [xiaozhi-esp32-music](https://github.com/Maggotxy/xiaozhi-esp32-music) dengan penambahan fitur music streaming dari STB server.
+<div align="center">
+
+**🌐 [English](#english-version) · 🇮🇩 [Bahasa Indonesia](#versi-bahasa-indonesia)**
+
+[![ESP32-S3](https://img.shields.io/badge/Chip-ESP32--S3-green.svg)](https://www.espressif.com/)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+
+</div>
 
 ---
 
-## 🌐 English Version
+## 🇮🇩 Versi Bahasa Indonesia
 
-**ESP32-S3 Firmware** — Xiaozhi AI Voice Assistant (Modified)
-
-ESP32-S3 firmware modified from [xiaozhi-esp32-music](https://github.com/Maggotxy/xiaozhi-esp32-music) with added music streaming feature from STB server.
+Firmware ESP32-S3 yang dimodifikasi dari [xiaozhi-esp32-music](https://github.com/Maggotxy/xiaozhi-esp32-music) dengan penambahan fitur music streaming dari STB server.
 
 ### 🔗 Base Project
 
@@ -79,4 +84,14 @@ ESP32-S3 berkomunikasi dengan STB via:
 1. **WebSocket MCP** — untuk tool calls (putar lagu, cuaca, berita, dll)
 2. **HTTP `/stream_pcm`** — minta URL audio dari `stream_server.py`
 3. **HTTP `/play`** — stream audio MP3 dari YouTube
+
+---
+
+## 🌐 English Version
+
+**ESP32-S3 Firmware** — Xiaozhi AI Voice Assistant (Modified)
+
+ESP32-S3 firmware modified from [xiaozhi-esp32-music](https://github.com/Maggotxy/xiaozhi-esp32-music) with added music streaming feature from STB server.
+
+### 🔗 Base Project
 

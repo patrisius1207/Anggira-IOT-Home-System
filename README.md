@@ -1,12 +1,20 @@
 # 🏠 Anggira — IOT Home System with Xiaozhi AI Music, News & Calendar
 
-Sistem smart home berbasis **ESP32** yang dikendalikan oleh asisten AI **Anggira** via suara (Xiaozhi), Telegram, dan web dashboard.
+<div align="center">
+
+**🌐 [English](#english-version) · 🇮🇩 [Bahasa Indonesia](#versi-bahasa-indonesia)**
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![ESP32](https://img.shields.io/badge/Platform-ESP32-green.svg)](https://www.espressif.com/)
+[![Python](https://img.shields.io/badge/Python-3.x-blue.svg)](https://www.python.org/)
+
+</div>
 
 ---
 
-## 🌐 English Version
+## 🇮🇩 Versi Bahasa Indonesia
 
-**Anggira** is an ESP32-based smart home system controlled by AI assistant **Anggira** via voice (Xiaozhi), Telegram, and web dashboard.
+Sistem smart home berbasis **ESP32** yang dikendalikan oleh asisten AI **Anggira** via suara (Xiaozhi), Telegram, dan web dashboard.
 
 ### 🗂️ Repository Structure
 
@@ -297,3 +305,11 @@ Dashboard web tersedia di `http://STB_IP:8088` dengan fitur:
 ## 📄 Lisensi
 
 MIT License — bebas digunakan dan dimodifikasi.
+
+---
+
+## 🌐 English Version
+
+**Anggira** is an ESP32-based smart home system controlled by AI assistant **Anggira** via voice (Xiaozhi), Telegram, and web dashboard.
+
+### 🗂️ Repository Structure

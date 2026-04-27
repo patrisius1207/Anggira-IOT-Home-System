@@ -1,14 +1,19 @@
 # 🌡️ Firmware ESP32-C3 Mini — Sensor Rumah & Kontrol Lampu
 
-Firmware untuk **ESP32-C3 Mini** sebagai sensor environment rumah sekaligus pengontrol lampu via servo motor.
+<div align="center">
+
+**🌐 [English](#english-version) · 🇮🇩 [Bahasa Indonesia](#versi-bahasa-indonesia)**
+
+[![ESP32-C3](https://img.shields.io/badge/Chip-ESP32--C3-blue.svg)](https://www.espressif.com/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+
+</div>
 
 ---
 
-## 🌐 English Version
+## 🇮🇩 Versi Bahasa Indonesia
 
-**ESP32-C3 Mini Firmware** — Home Environment Sensor & Lamp Control
-
-Firmware for **ESP32-C3 Mini** as home environment sensor and lamp controller via servo motor.
+Firmware untuk **ESP32-C3 Mini** sebagai sensor environment rumah sekaligus pengontrol lampu via servo motor.
 
 ### 🔧 Hardware
 
@@ -183,3 +188,13 @@ Buka `http://192.168.1.222` di browser untuk melihat:
 - Status & kontrol lampu
 - CPU load & RAM ESP32
 - Pengaturan jadwal lampu otomatis
+
+---
+
+## 🌐 English Version
+
+**ESP32-C3 Mini Firmware** — Home Environment Sensor & Lamp Control
+
+Firmware for **ESP32-C3 Mini** as home environment sensor and lamp controller via servo motor.
+
+### 🔧 Hardware
