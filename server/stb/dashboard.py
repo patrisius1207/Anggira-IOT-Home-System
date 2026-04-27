@@ -34,6 +34,35 @@ DEFAULT_CONFIG = {
     "chime_enabled": True,
     "chime_text": "jam berapa sekarang dan kapan hujan di cebongan salatiga",
     "chime_hours": list(range(6, 22)),   # jam 06:00–21:00
+    "quotes_enabled": True,
+    "quotes_hours": list(range(6, 22)),  # jam 06:00–21:00
+    "quotes_list": [
+        "Hidup adalah perjalanan, bukan tujuan.",
+        "Setiap hari adalah kesempatan baru untuk menjadi lebih baik.",
+        "Kesabaran adalah kunci kebahagiaan.",
+        "Jangan menyerah, masa depan cerah menantimu.",
+        "Kegagalan adalah awal dari keberhasilan.",
+        "Syukuri apa yang ada, niscaya bertambah.",
+        "Hargai waktu, waktu adalah uang.",
+        "Percaya pada diri sendiri adalah langkah pertama menuju sukses.",
+        "Kebaikan akan kembali dalam bentuk yang tak terduga.",
+        "Belajar dari masa lalu untuk masa depan yang lebih baik.",
+        "Kerja keras adalah jembatan menuju impian.",
+        "Jadilah versi terbaik dari dirimu sendiri.",
+        "Setiap masalah memiliki solusi, tetaplah positif.",
+        "Kebahagiaan datang dari rasa syukur.",
+        "Fokus pada solusi, bukan masalah.",
+        "Hari ini adalah hadiah, gunakan dengan bijak.",
+        "Keberanian menghadapi tantangan membentuk karakter.",
+        "Rendah hati adalah tanda kebesaran jiwa.",
+        "Setiap langkah kecil membawa perubahan besar.",
+        "Hidup sederhana, berpikir besar.",
+        "Kesuksesan dimulai dari keputusan untuk mencoba.",
+        "Jangan takut salah, takutlah tidak mencoba.",
+        "Optimisme adalah kunci menghadapi hari yang sulit.",
+        "Kasih sayang adalah bahasa universal.",
+        "Tetaplah tegar dalam menghadapi cobaan.",
+    ],
 }
 
 def load_config():
@@ -138,6 +167,16 @@ def build_html():
 
     chime_enabled_checked = "checked" if cfg.get("chime_enabled", True) else ""
     chime_text_val = cfg.get("chime_text", DEFAULT_CONFIG["chime_text"])
+
+    quotes_enabled_checked = "checked" if cfg.get("quotes_enabled", True) else ""
+    quotes_hours_val = json.dumps(cfg.get("quotes_hours", DEFAULT_CONFIG["quotes_hours"]))
+    quotes_hour_checkboxes = ""
+    for h in range(0, 24):
+        checked = "checked" if h in cfg.get("quotes_hours", DEFAULT_CONFIG["quotes_hours"]) else ""
+        quotes_hour_checkboxes += f'<label class="hour-cb"><input type="checkbox" value="{h}" {checked}><span>{h:02d}</span></label>'
+
+    quotes_list = cfg.get("quotes_list", DEFAULT_CONFIG["quotes_list"])
+    quotes_list_json = json.dumps(quotes_list)
 
     return f"""<!DOCTYPE html>
 <html lang="id">
@@ -290,6 +329,7 @@ pre{{
 <div class="nav">
   <button class="active" onclick="tab(this,'logs')">📋 Logs</button>
   <button onclick="tab(this,'chime')">🕐 Chime</button>
+  <button onclick="tab(this,'quotes')">💬 Quotes</button>
   <button onclick="tab(this,'tokens')">🔑 Tokens</button>
   <button onclick="tab(this,'playlist')">🎵 Playlist</button>
   <button onclick="tab(this,'esp32')">📡 ESP32</button>
@@ -347,6 +387,52 @@ pre{{
     </div>
 
     <button class="save-btn" onclick="saveChime()">💾 Simpan Pengaturan Chime</button>
+  </div>
+</div>
+
+<!-- ═══ QUOTES ═══ -->
+<div id="panel-quotes" class="panel">
+  <div class="section">
+    <div class="section-title">Pengaturan Quotes Per Jam</div>
+    <div id="quotes-banner" class="banner"></div>
+
+    <div class="toggle-row">
+      <label class="toggle">
+        <input type="checkbox" id="quotes-enabled" {quotes_enabled_checked}>
+        <span class="slider"></span>
+      </label>
+      <span class="toggle-label">Aktifkan quotes per jam (ESP32 ucapkan quote random setiap jam +1 menit)</span>
+    </div>
+
+    <div class="field">
+      <label>JAM AKTIF (centang jam yang ingin menampilkan quotes)</label>
+      <div class="hour-grid" id="quotes-hour-grid">
+        {quotes_hour_checkboxes}
+      </div>
+    </div>
+
+    <button class="save-btn" onclick="saveQuotes()">💾 Simpan Pengaturan Quotes</button>
+  </div>
+
+  <div class="section" style="margin-top:24px">
+    <div class="section-title">Kelola Daftar Quotes</div>
+
+    <!-- Daftar Quotes -->
+    <div id="quotes-list" style="margin-bottom:16px"></div>
+
+    <!-- Form Tambah/Edit Quote -->
+    <div class="field">
+      <label>TAMBAH / EDIT QUOTE</label>
+      <div class="input-row">
+        <input type="text" id="quote-text" placeholder="Masukkan quote baru..." style="width:100%">
+        <button class="save-btn" onclick="addQuote()">➕ Tambah</button>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="save-btn" onclick="saveQuotesList()">💾 Simpan Daftar Quotes</button>
+      <button class="save-btn danger" onclick="resetQuotes()">🔄 Reset ke Default</button>
+    </div>
   </div>
 </div>
 
@@ -462,6 +548,84 @@ async function saveChime() {{
   const d = await r.json();
   showBanner('chime-banner', d.ok, d.ok ? '✅ Chime disimpan!' : '❌ ' + d.error);
 }}
+
+// ── Quotes ─────────────────────────────────────────────────────
+let _quotesList = {quotes_list_json};
+
+async function saveQuotes() {{
+  const enabled = document.getElementById('quotes-enabled').checked;
+  const hours   = [...document.querySelectorAll('#quotes-hour-grid input:checked')].map(i => parseInt(i.value));
+  const r = await fetch('/api/save_quotes', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{quotes_enabled: enabled, quotes_hours: hours}})
+  }});
+  const d = await r.json();
+  showBanner('quotes-banner', d.ok, d.ok ? '✅ Quotes disimpan!' : '❌ ' + d.error);
+}}
+
+function renderQuotesList() {{
+  const list = document.getElementById('quotes-list');
+  if (!list) return;
+
+  if (_quotesList.length === 0) {{
+    list.innerHTML = '<p style="color:var(--dim);font-size:12px">Belum ada quotes.</p>';
+    return;
+  }}
+
+  let html = '<div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">';
+  _quotesList.forEach((quote, index) => {{
+    html += `<div style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border)">
+      <span style="color:var(--accent);font-size:11px;width:24px">${{index + 1}}.</span>
+      <span style="flex:1;font-size:12px;color:var(--text)">${{quote}}</span>
+      <button class="save-btn" style="padding:4px 8px;font-size:10px;background:#ff6b35" onclick="deleteQuote(${{index}})">🗑</button>
+    </div>`;
+  }});
+  html += '</div>';
+  list.innerHTML = html;
+}}
+
+function addQuote() {{
+  const input = document.getElementById('quote-text');
+  const text = input.value.trim();
+  if (!text) {{ alert('Isi quote dulu!'); return; }}
+
+  _quotesList.push(text);
+  input.value = '';
+  renderQuotesList();
+}}
+
+function deleteQuote(index) {{
+  if (!confirm(`Hapus quote "${{_quotesList[index]}}"?`)) return;
+  _quotesList.splice(index, 1);
+  renderQuotesList();
+}}
+
+async function saveQuotesList() {{
+  const r = await fetch('/api/save_quotes_list', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{quotes_list: _quotesList}})
+  }});
+  const d = await r.json();
+  showBanner('quotes-banner', d.ok, d.ok ? `✅ Daftar quotes disimpan (${{_quotesList.length}} quotes)` : '❌ ' + d.error);
+}}
+
+async function resetQuotes() {{
+  if (!confirm('Reset ke daftar quotes default? Semua quotes custom akan hilang.')) return;
+  const r = await fetch('/api/reset_quotes', {{method:'POST'}});
+  const d = await r.json();
+  if (d.ok) {{
+    _quotesList = d.quotes_list;
+    renderQuotesList();
+    showBanner('quotes-banner', true, `✅ Reset ke default (${{_quotesList.length}} quotes)`);
+  }} else {{
+    showBanner('quotes-banner', false, '❌ ' + d.error);
+  }}
+}}
+
+// Initialize quotes list on page load
+renderQuotesList();
 
 // ── Playlist ────────────────────────────────────────────────────
 let _playlists = {{}};
@@ -702,6 +866,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 cfg["chime_hours"]   = [int(h) for h in data.get("chime_hours", [])]
                 save_config(cfg)
                 self.send_json({"ok": True})
+            except Exception as e:
+                self.send_json({"ok": False, "error": str(e)})
+
+        elif path == "/api/save_quotes":
+            data = self.read_body()
+            try:
+                cfg = load_config()
+                cfg["quotes_enabled"] = bool(data.get("quotes_enabled", True))
+                cfg["quotes_hours"]   = [int(h) for h in data.get("quotes_hours", [])]
+                save_config(cfg)
+                self.send_json({"ok": True})
+            except Exception as e:
+                self.send_json({"ok": False, "error": str(e)})
+
+        elif path == "/api/save_quotes_list":
+            data = self.read_body()
+            try:
+                cfg = load_config()
+                cfg["quotes_list"] = [str(q).strip() for q in data.get("quotes_list", []) if str(q).strip()]
+                save_config(cfg)
+                self.send_json({"ok": True})
+            except Exception as e:
+                self.send_json({"ok": False, "error": str(e)})
+
+        elif path == "/api/reset_quotes":
+            try:
+                cfg = load_config()
+                cfg["quotes_list"] = DEFAULT_CONFIG["quotes_list"].copy()
+                save_config(cfg)
+                self.send_json({"ok": True, "quotes_list": cfg["quotes_list"]})
             except Exception as e:
                 self.send_json({"ok": False, "error": str(e)})
 

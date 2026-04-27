@@ -20,9 +20,12 @@ lyric_cache = {}
 def get_audio_info(song, artist=""):
     raw_query = f"{song} {artist}".strip() if artist else song
     ydl_opts = {
-        'format': 'bestaudio',
+        'format': 'bestaudio/best',
         'quiet': True,
         'noplaylist': True,
+        'jsruntimes': ['node'],
+        'default_search': 'auto',
+        'nocheckcertificate': True,
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         if song.startswith("http://") or song.startswith("https://"):
@@ -33,7 +36,11 @@ def get_audio_info(song, artist=""):
         else:
             log.info(f"Searching YouTube for: {raw_query}")
             info = ydl.extract_info(f"ytsearch:{raw_query}", download=False)
-            info = info['entries'][0]
+            if isinstance(info, dict) and info.get('entries'):
+                info = info['entries'][0]
+
+        if not isinstance(info, dict) or 'url' not in info:
+            raise ValueError(f"No audio URL found for {song}")
 
         log.info(f"Found: {info.get('title')} ({info.get('duration')}s)")
         return {

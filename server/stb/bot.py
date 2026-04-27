@@ -21,6 +21,7 @@ Env variables (.bashrc):
 import json
 import logging
 import os
+import random
 import time
 import urllib.request
 import urllib.error
@@ -53,6 +54,8 @@ DEFAULT_CHIME = {
     "chime_enabled": True,
     "chime_text":    "jam berapa sekarang dan kapan hujan di cebongan salatiga",
     "chime_hours":   list(range(6, 22)),
+    "quotes_enabled": True,
+    "quotes_hours":  list(range(6, 22)),
 }
 
 def load_chime_config() -> dict:
@@ -365,6 +368,53 @@ async def handle_chime():
         await asyncio.sleep(30)
 
 
+# ── Quotes ─────────────────────────────────────────────────────
+
+INDONESIAN_QUOTES = []  # Will be loaded from dashboard config
+
+logger_quote = logging.getLogger("Quote")
+
+async def handle_quotes():
+    """
+    Loop async — setiap 30 detik cek waktu.
+    Jika menit == 1 dan quotes_enabled dan jam ada di quotes_hours → kirim quote random ke ESP32.
+    Config dibaca ulang tiap cek sehingga perubahan dashboard langsung berlaku.
+    """
+    last_triggered_hour = -1
+    logger_quote.info("Quote loop aktif ✓")
+
+    while True:
+        try:
+            now  = datetime.now()
+            hour = now.hour
+            mnt  = now.minute
+
+            if mnt == 1 and hour != last_triggered_hour:
+                cfg = load_chime_config()
+
+                if cfg.get("quotes_enabled") and hour in cfg.get("quotes_hours", []):
+                    quotes_list = cfg.get("quotes_list", [])
+                    if quotes_list:
+                        quote = random.choice(quotes_list)
+                        logger_quote.info("Jam %02d:01 → '%s'", hour, quote)
+
+                        loop = asyncio.get_running_loop()
+                        ok_say = await loop.run_in_executor(None, send_say_http, quote)
+                        logger_quote.info("Say %s", "OK ✓" if ok_say else "GAGAL ✗")
+                    else:
+                        logger_quote.warning("Jam %02d:01 — skip (daftar quotes kosong)", hour)
+                else:
+                    reason = "disabled" if not cfg.get("quotes_enabled") else f"jam {hour} tidak aktif"
+                    logger_quote.debug("Jam %02d:01 — skip (%s)", hour, reason)
+
+                last_triggered_hour = hour
+
+        except Exception as e:
+            logger_quote.error("Quote loop error: %s", e)
+
+        await asyncio.sleep(30)
+
+
 # ── Main ──────────────────────────────────────────────────────
 
 async def main():
@@ -400,7 +450,7 @@ async def main():
                 await app.stop()
                 await app.shutdown()
 
-    await asyncio.gather(run_bot(), handle_chime())
+    await asyncio.gather(run_bot(), handle_chime(), handle_quotes())
 
 
 if __name__ == "__main__":
