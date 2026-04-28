@@ -198,3 +198,82 @@ Buka `http://192.168.1.222` di browser untuk melihat:
 Firmware for **ESP32-C3 Mini** as home environment sensor and lamp controller via servo motor.
 
 ### 🔧 Hardware
+
+| Component | Function |
+|---|---|
+| ESP32-C3 Mini | Main microcontroller |
+| AHT20 (I2C 0x38) | Temperature & humidity sensor |
+| BMP280 (I2C 0x76/0x77) | Temperature & air pressure sensor |
+| Servo Motor | Press physical lamp switch button |
+| Buzzer | WiFi status indicator |
+
+### 📌 Pin Configuration
+
+| Pin | Function |
+|---|---|
+| GPIO 4 | SDA (I2C) |
+| GPIO 5 | SCL (I2C) |
+| GPIO 10 | Servo PWM |
+| GPIO 6 | Buzzer |
+
+### 📦 Required Libraries (Arduino IDE / PlatformIO)
+
+```
+- AsyncTCP
+- ESPAsyncWebServer
+- Adafruit BMP280
+- ESP32Servo
+```
+
+### ⚙️ Configuration
+
+Edit WiFi section in `Servotemperature.ino`:
+
+```cpp
+const char *ssid     = "YOUR_WIFI_SSID";
+const char *password = "YOUR_WIFI_PASSWORD";
+
+// Static IP
+IPAddress local_IP(192, 168, 1, 222);
+IPAddress gateway(192, 168, 1, 1);
+```
+
+### 🌐 HTTP API
+
+Base URL: `http://192.168.1.222`
+
+| Endpoint | Method | Response | Description |
+|---|---|---|---|
+| `/` | GET | HTML | Web dashboard |
+| `/data` | GET | JSON | All sensor + system data |
+| `/sensor_rumah` | GET | JSON | Data for Anggira AI |
+| `/time` | GET | text | WIB time |
+| `/on` | GET | `OK` | Turn lamp on |
+| `/off` | GET | `OK` | Turn lamp off |
+| `/lamp` | GET | `on`/`off` | Lamp status |
+| `/jadwal` | GET | JSON | ON/OFF schedule |
+| `/set?on=HH:MM&off=HH:MM` | GET | `OK` | Set schedule |
+
+### Example Response `/sensor_rumah`
+```json
+{
+  "nama": "sensor rumah",
+  "temperature": 28.5,
+  "humidity": 72.3,
+  "pressure": 1013.2,
+  "lamp": "on"
+}
+```
+
+### 🔊 Buzzer Indicator
+
+- **2x short beeps** — WiFi connected successfully
+- **3x fast beeps** — WiFi timeout / connection failed
+
+### 🌐 Web Dashboard
+
+Open `http://192.168.1.222` in browser to view:
+- Temperature, humidity, pressure data
+- Lamp status & control
+- ESP32 CPU load & RAM
+- Automatic lamp schedule settings

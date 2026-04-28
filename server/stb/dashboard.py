@@ -36,33 +36,6 @@ DEFAULT_CONFIG = {
     "chime_hours": list(range(6, 22)),   # jam 06:00–21:00
     "quotes_enabled": True,
     "quotes_hours": list(range(6, 22)),  # jam 06:00–21:00
-    "quotes_list": [
-        "Hidup adalah perjalanan, bukan tujuan.",
-        "Setiap hari adalah kesempatan baru untuk menjadi lebih baik.",
-        "Kesabaran adalah kunci kebahagiaan.",
-        "Jangan menyerah, masa depan cerah menantimu.",
-        "Kegagalan adalah awal dari keberhasilan.",
-        "Syukuri apa yang ada, niscaya bertambah.",
-        "Hargai waktu, waktu adalah uang.",
-        "Percaya pada diri sendiri adalah langkah pertama menuju sukses.",
-        "Kebaikan akan kembali dalam bentuk yang tak terduga.",
-        "Belajar dari masa lalu untuk masa depan yang lebih baik.",
-        "Kerja keras adalah jembatan menuju impian.",
-        "Jadilah versi terbaik dari dirimu sendiri.",
-        "Setiap masalah memiliki solusi, tetaplah positif.",
-        "Kebahagiaan datang dari rasa syukur.",
-        "Fokus pada solusi, bukan masalah.",
-        "Hari ini adalah hadiah, gunakan dengan bijak.",
-        "Keberanian menghadapi tantangan membentuk karakter.",
-        "Rendah hati adalah tanda kebesaran jiwa.",
-        "Setiap langkah kecil membawa perubahan besar.",
-        "Hidup sederhana, berpikir besar.",
-        "Kesuksesan dimulai dari keputusan untuk mencoba.",
-        "Jangan takut salah, takutlah tidak mencoba.",
-        "Optimisme adalah kunci menghadapi hari yang sulit.",
-        "Kasih sayang adalah bahasa universal.",
-        "Tetaplah tegar dalam menghadapi cobaan.",
-    ],
 }
 
 def load_config():
@@ -174,9 +147,6 @@ def build_html():
     for h in range(0, 24):
         checked = "checked" if h in cfg.get("quotes_hours", DEFAULT_CONFIG["quotes_hours"]) else ""
         quotes_hour_checkboxes += f'<label class="hour-cb"><input type="checkbox" value="{h}" {checked}><span>{h:02d}</span></label>'
-
-    quotes_list = cfg.get("quotes_list", DEFAULT_CONFIG["quotes_list"])
-    quotes_list_json = json.dumps(quotes_list)
 
     return f"""<!DOCTYPE html>
 <html lang="id">
@@ -386,7 +356,10 @@ pre{{
       </div>
     </div>
 
-    <button class="save-btn" onclick="saveChime()">💾 Simpan Pengaturan Chime</button>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="save-btn" onclick="saveChime()">💾 Simpan Pengaturan Chime</button>
+      <button class="save-btn" style="background:#00ff88;color:#000" onclick="testChime()">🔔 Coba Chime</button>
+    </div>
   </div>
 </div>
 
@@ -411,27 +384,20 @@ pre{{
       </div>
     </div>
 
-    <button class="save-btn" onclick="saveQuotes()">💾 Simpan Pengaturan Quotes</button>
-  </div>
-
-  <div class="section" style="margin-top:24px">
-    <div class="section-title">Kelola Daftar Quotes</div>
-
-    <!-- Daftar Quotes -->
-    <div id="quotes-list" style="margin-bottom:16px"></div>
-
-    <!-- Form Tambah/Edit Quote -->
-    <div class="field">
-      <label>TAMBAH / EDIT QUOTE</label>
-      <div class="input-row">
-        <input type="text" id="quote-text" placeholder="Masukkan quote baru..." style="width:100%">
-        <button class="save-btn" onclick="addQuote()">➕ Tambah</button>
+    <div class="field" style="margin-top:16px">
+      <label style="color:var(--accent);font-size:11px">QUOTE YANG AKAN DIPILIH SECARA RANDOM:</label>
+      <div style="background:#0a1520;border:1px solid var(--border);border-radius:6px;padding:12px;margin-top:8px">
+        <div style="font-size:12px;color:var(--text);margin-bottom:6px">📝 kata mutiara hari ini</div>
+        <div style="font-size:12px;color:var(--text);margin-bottom:6px">📖 kutipan alkitab hari ini</div>
+        <div style="font-size:12px;color:var(--text);margin-bottom:6px">🎵 kutipan lirik lagu hari ini</div>
+        <div style="font-size:12px;color:var(--text);margin-bottom:6px">🇨🇳 kata mandarin dan artinya hari ini</div>
+        <div style="font-size:12px;color:var(--text)">🇰🇷 kata korea dan artinya hari ini</div>
       </div>
     </div>
 
-    <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="save-btn" onclick="saveQuotesList()">💾 Simpan Daftar Quotes</button>
-      <button class="save-btn danger" onclick="resetQuotes()">🔄 Reset ke Default</button>
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="save-btn" onclick="saveQuotes()">💾 Simpan Pengaturan Quotes</button>
+      <button class="save-btn" style="background:#00ff88;color:#000" onclick="testQuote()">💬 Coba Quote</button>
     </div>
   </div>
 </div>
@@ -549,8 +515,21 @@ async function saveChime() {{
   showBanner('chime-banner', d.ok, d.ok ? '✅ Chime disimpan!' : '❌ ' + d.error);
 }}
 
+async function testChime() {{
+  const text = document.getElementById('chime-text').value.trim();
+  if (!text) {{ alert('Isi teks chime dulu!'); return; }}
+  await doSay(text);
+  showBanner('chime-banner', true, '🔔 Chime dicoba: ' + text);
+}}
+
 // ── Quotes ─────────────────────────────────────────────────────
-let _quotesList = {quotes_list_json};
+const QUOTE_PROMPTS = [
+  "kata mutiara hari ini",
+  "kutipan alkitab hari ini",
+  "kutipan lirik lagu hari ini",
+  "kata mandarin dan artinya hari ini",
+  "kata korea dan artinya hari ini"
+];
 
 async function saveQuotes() {{
   const enabled = document.getElementById('quotes-enabled').checked;
@@ -564,68 +543,11 @@ async function saveQuotes() {{
   showBanner('quotes-banner', d.ok, d.ok ? '✅ Quotes disimpan!' : '❌ ' + d.error);
 }}
 
-function renderQuotesList() {{
-  const list = document.getElementById('quotes-list');
-  if (!list) return;
-
-  if (_quotesList.length === 0) {{
-    list.innerHTML = '<p style="color:var(--dim);font-size:12px">Belum ada quotes.</p>';
-    return;
-  }}
-
-  let html = '<div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px">';
-  _quotesList.forEach((quote, index) => {{
-    html += `<div style="display:flex;align-items:center;gap:8px;padding:6px;border-bottom:1px solid var(--border)">
-      <span style="color:var(--accent);font-size:11px;width:24px">${{index + 1}}.</span>
-      <span style="flex:1;font-size:12px;color:var(--text)">${{quote}}</span>
-      <button class="save-btn" style="padding:4px 8px;font-size:10px;background:#ff6b35" onclick="deleteQuote(${{index}})">🗑</button>
-    </div>`;
-  }});
-  html += '</div>';
-  list.innerHTML = html;
+async function testQuote() {{
+  const randomPrompt = QUOTE_PROMPTS[Math.floor(Math.random() * QUOTE_PROMPTS.length)];
+  await doSay(randomPrompt);
+  showBanner('quotes-banner', true, '💬 Quote dicoba: ' + randomPrompt);
 }}
-
-function addQuote() {{
-  const input = document.getElementById('quote-text');
-  const text = input.value.trim();
-  if (!text) {{ alert('Isi quote dulu!'); return; }}
-
-  _quotesList.push(text);
-  input.value = '';
-  renderQuotesList();
-}}
-
-function deleteQuote(index) {{
-  if (!confirm(`Hapus quote "${{_quotesList[index]}}"?`)) return;
-  _quotesList.splice(index, 1);
-  renderQuotesList();
-}}
-
-async function saveQuotesList() {{
-  const r = await fetch('/api/save_quotes_list', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{quotes_list: _quotesList}})
-  }});
-  const d = await r.json();
-  showBanner('quotes-banner', d.ok, d.ok ? `✅ Daftar quotes disimpan (${{_quotesList.length}} quotes)` : '❌ ' + d.error);
-}}
-
-async function resetQuotes() {{
-  if (!confirm('Reset ke daftar quotes default? Semua quotes custom akan hilang.')) return;
-  const r = await fetch('/api/reset_quotes', {{method:'POST'}});
-  const d = await r.json();
-  if (d.ok) {{
-    _quotesList = d.quotes_list;
-    renderQuotesList();
-    showBanner('quotes-banner', true, `✅ Reset ke default (${{_quotesList.length}} quotes)`);
-  }} else {{
-    showBanner('quotes-banner', false, '❌ ' + d.error);
-  }}
-}}
-
-// Initialize quotes list on page load
-renderQuotesList();
 
 // ── Playlist ────────────────────────────────────────────────────
 let _playlists = {{}};
@@ -877,25 +799,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 cfg["quotes_hours"]   = [int(h) for h in data.get("quotes_hours", [])]
                 save_config(cfg)
                 self.send_json({"ok": True})
-            except Exception as e:
-                self.send_json({"ok": False, "error": str(e)})
-
-        elif path == "/api/save_quotes_list":
-            data = self.read_body()
-            try:
-                cfg = load_config()
-                cfg["quotes_list"] = [str(q).strip() for q in data.get("quotes_list", []) if str(q).strip()]
-                save_config(cfg)
-                self.send_json({"ok": True})
-            except Exception as e:
-                self.send_json({"ok": False, "error": str(e)})
-
-        elif path == "/api/reset_quotes":
-            try:
-                cfg = load_config()
-                cfg["quotes_list"] = DEFAULT_CONFIG["quotes_list"].copy()
-                save_config(cfg)
-                self.send_json({"ok": True, "quotes_list": cfg["quotes_list"]})
             except Exception as e:
                 self.send_json({"ok": False, "error": str(e)})
 

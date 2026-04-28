@@ -95,3 +95,32 @@ ESP32-S3 firmware modified from [xiaozhi-esp32-music](https://github.com/Maggotx
 
 ### 🔗 Base Project
 
+Fork & modified from:
+- **Maggotxy/xiaozhi-esp32-music**: https://github.com/Maggotxy/xiaozhi-esp32-music
+- **xinnan-tech/xiaozhi-esp32**: https://github.com/xinnan-tech/xiaozhi-esp32
+
+### 🎯 Modification Features
+
+- Wake word: **"Hi, ESP"** (model `wn9_hiesp`)
+- Integration with `stream_server.py` on STB for playing music from YouTube
+- HTTP endpoints `/wake`, `/say`, `/status` for control via Telegram bot
+- MAC Address: `XX:XX:XX:XX:XX:XX` (configure in your device)
+
+### 📦 Setup
+
+1. Clone base project from links above
+2. Follow official Xiaozhi ESP32 setup guide
+3. Configure WiFi and MCP server address (STB IP)
+
+#### Important configuration:
+- **WiFi**: adjust SSID and password
+- **MCP Endpoint**: point to `ws://STB_IP:PORT/mcp`
+- **Static IP ESP32-S3**: `192.168.1.X` (adjust accordingly)
+
+### 🔗 Integration with STB Server
+
+ESP32-S3 communicates with STB via:
+1. **WebSocket MCP** — for tool calls (play music, weather, news, etc.)
+2. **HTTP `/stream_pcm`** — request audio URL from `stream_server.py`
+3. **HTTP `/play`** — stream MP3 audio from YouTube
+
