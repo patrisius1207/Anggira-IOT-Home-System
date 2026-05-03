@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+# Load environment variables
+if [ -f "$HOME/.anggira_env.sh" ]; then
+    source "$HOME/.anggira_env.sh"
+fi
+
 BASE="$HOME/anggira"
 
 ANGGIRA="$BASE/anggira.py"
@@ -20,6 +25,13 @@ start() {
     LOGFILE=$3
 
     while true; do
+        # Check if process is already running
+        if pgrep -f "$FILE" > /dev/null; then
+            echo "$(date) $NAME already running, skip..." >> "$LOG"
+            sleep 5
+            continue
+        fi
+
         echo "$(date) START $NAME" >> "$LOG"
 
         if [ -f "$FILE" ]; then
@@ -31,7 +43,7 @@ start() {
         fi
 
         EXIT_CODE=$?
-        echo "$(date) $NAME EXIT code=$EXIT_CODE, restart 3 detik" >> "$LOG"
+        echo "$(date) $NAME EXIT code=$EXIT_CODE, restarting in 3s..." >> "$LOG"
         sleep 3
     done
 }
